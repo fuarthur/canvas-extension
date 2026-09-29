@@ -1,0 +1,73 @@
+import { dateKey, validDay } from './dates.js';
+
+function contextCodes(record) {
+  const codes = String(record.all_context_codes || record.context_code || '').split(',').filter(Boolean);
+  if (record.context_code && !codes.includes(record.context_code)) codes.push(record.context_code);
+  return codes;
+}
+
+function itemContexts(record, names) {
+  return contextCodes(record).map(code => names.get(code) || record.context_name || code);
+}
+
+function makeEvent(record, names, state, timeZone) {
+  const startAt = record.start_at || record.end_at;
+  const endAt = record.end_at || record.start_at;
+  const startDay = dateKey(startAt, timeZone);
+  const rawEndDay = dateKey(endAt, timeZone);
+  if (!startDay) return null;
+  const key = `event:${record.id}`;
+  const warnings = [];
+  if (rawEndDay && rawEndDay < startDay) warnings.push('Canvas event ends before it starts.');
+  return {
+    key, type: 'event', title: record.title || 'Untitled event',
+    contexts: itemContexts(record, names), startDay,
+    endDay: rawEndDay && rawEndDay >= startDay ? rawEndDay : startDay,
+    startAt, endAt, url: record.html_url || null,
+    completed: Boolean(state.completed?.[key]), needsStart: false, warnings
+  };
+}
+
+function makeAssignment(record, names, state, timeZone) {
+  const assignment = record.assignment;
+  const dueAt = assignment ? assignment.due_at : record.end_at;
+  const dueDay = dateKey(dueAt, timeZone);
+  if (!dueDay) return null;
+  const id = String(record.id).replace(/^assignment_/, '');
+  const key = `assignment:${id}`;
+  const unlockAt = assignment?.unlock_at || null;
+  const unlockDay = dateKey(unlockAt, timeZone);
+  const manual = state.starts?.[key];
+  const warnings = [];
+  let startDay = unlockDay && unlockDay <= dueDay ? unlockDay : dueDay;
+  if (manual != null) {
+    if (validDay(manual) && manual <= dueDay) startDay = manual;
+    else warnings.push('The saved plan start is invalid or after the due date.');
+  }
+  return {
+    key, type: 'assignment', title: record.title || assignment?.name || 'Untitled assignment',
+    contexts: itemContexts(record, names), startDay, endDay: dueDay,
+    startAt: manual && startDay === manual ? null : unlockAt,
+    endAt: dueAt, url: record.html_url || assignment?.html_url || null,
+    completed: Boolean(state.completed?.[key]), needsStart: !unlockDay && !(manual && startDay === manual), warnings
+  };
+}
+
+export function normalizeItems(snapshot, userState = { starts: {}, completed: {} }) {
+  const names = new Map(snapshot.contexts.map(context => [context.code, context.name]));
+  const merged = new Map();
+  const add = item => {
+    if (!item) return;
+    const existing = merged.get(item.key);
+    if (!existing) {
+      merged.set(item.key, item);
+      return;
+    }
+    for (const context of item.contexts) {
+      if (!existing.contexts.includes(context)) existing.contexts.push(context);
+    }
+  };
+  for (const record of snapshot.events) add(makeEvent(record, names, userState, snapshot.profile.time_zone));
+  for (const record of snapshot.assignments) add(makeAssignment(record, names, userState, snapshot.profile.time_zone));
+  return [...merged.values()];
+}
