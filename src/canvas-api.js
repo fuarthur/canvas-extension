@@ -45,7 +45,7 @@ function nextLink(link) {
   return null;
 }
 
-export async function fetchPages(fetchImpl, url) {
+export async function fetchPages(fetchImpl, url, listKey = null) {
   const rows = [];
   const seen = new Set();
   let next = safeUrl(url).href;
@@ -53,8 +53,9 @@ export async function fetchPages(fetchImpl, url) {
     if (seen.has(next)) throw new CanvasApiError('DATA', 'Canvas pagination repeated a page.');
     seen.add(next);
     const { body, link } = await getJson(fetchImpl, next);
-    if (!Array.isArray(body)) throw new CanvasApiError('DATA', 'Canvas returned a list in an unexpected format.');
-    rows.push(...body);
+    const page = Array.isArray(body) ? body : listKey && body?.[listKey];
+    if (!Array.isArray(page)) throw new CanvasApiError('DATA', 'Canvas returned a list in an unexpected format.');
+    rows.push(...page);
     next = nextLink(link) ? safeUrl(nextLink(link)).href : null;
   }
   return rows;
@@ -94,7 +95,7 @@ export async function loadCanvasSnapshot({ fetchImpl = fetch, month }) {
   const [courses, groups, accountCalendars] = await Promise.all([
     fetchPages(fetchImpl, `${ORIGIN}/api/v1/courses?enrollment_state=active&per_page=100`),
     fetchPages(fetchImpl, `${ORIGIN}/api/v1/users/self/groups?per_page=100`),
-    fetchPages(fetchImpl, `${ORIGIN}/api/v1/account_calendars?per_page=100`)
+    fetchPages(fetchImpl, `${ORIGIN}/api/v1/account_calendars?per_page=100`, 'account_calendars')
   ]);
   const contexts = [
     { code: `user_${profile.id}`, name: 'Personal' },

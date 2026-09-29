@@ -21,6 +21,17 @@ test('fetchPages follows Link pagination and gathers all rows', async () => {
   assert.equal(calls.length, 2);
 });
 
+test('fetchPages accepts Illinois account calendar envelope across pages', async () => {
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls++;
+    return calls === 1
+      ? json({ account_calendars: [{ id: 15 }], total_results: 2 }, { link: `<${origin}/api/v1/account_calendars?page=2>; rel="next"` })
+      : json({ account_calendars: [{ id: 16 }], total_results: 2 });
+  };
+  assert.deepEqual(await fetchPages(fetchImpl, `${origin}/api/v1/account_calendars`, 'account_calendars'), [{ id: 15 }, { id: 16 }]);
+});
+
 test('fetchPages rejects a repeated next-page link', async () => {
   const url = `${origin}/api/v1/items`;
   const fetchImpl = async () => json([1], { link: `<${url}>; rel="next"` });
@@ -41,7 +52,7 @@ test('loadCanvasSnapshot batches 12 contexts including account calendars and ret
     if (url.pathname === '/api/v1/users/self/profile') return json(fixture.profile);
     if (url.pathname === '/api/v1/courses') return json(fixture.courses);
     if (url.pathname === '/api/v1/users/self/groups') return json(fixture.groups);
-    if (url.pathname === '/api/v1/account_calendars') return json(fixture.accountCalendars);
+    if (url.pathname === '/api/v1/account_calendars') return json({ account_calendars: fixture.accountCalendars, total_results: fixture.accountCalendars.length });
     if (url.pathname === '/api/v1/courses/1/assignments/987') return json(fixture.assignmentDetail);
     if (url.pathname === '/api/v1/calendar_events') {
       calendarUrls.push(url);
