@@ -80,7 +80,9 @@ test('month controls, Escape and cross-week bars work without a new Canvas reque
 test('detail links to Canvas and saves start date and completion locally', async () => {
   const { host, planner, saved, click, dom } = setup();
   await planner.toggle();
-  host.shadowRoot.querySelector('[data-item-key="assignment:987"]').click();
+  const assignmentBar = host.shadowRoot.querySelector('[data-item-key="assignment:987"]');
+  assert.match(assignmentBar.textContent, /Course 1/);
+  assignmentBar.click();
   const link = host.shadowRoot.querySelector('a[aria-label="Open in Canvas"]');
   assert.equal(link.href, fixture.assignment.html_url);
   const date = host.shadowRoot.querySelector('input[aria-label="Plan start date"]');

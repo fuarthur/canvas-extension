@@ -34,13 +34,14 @@ test('fetchPages rejects HTML login responses and authorization failures', async
   await assert.rejects(fetchPages(async () => new Response('{}', { status: 401 }), `${origin}/api/v1/items`), error => error.code === 'AUTH');
 });
 
-test('loadCanvasSnapshot batches 11 contexts and retrieves effective assignment dates', async () => {
+test('loadCanvasSnapshot batches 12 contexts including account calendars and retrieves effective assignment dates', async () => {
   const calendarUrls = [];
   const fetchImpl = async input => {
     const url = new URL(input, origin);
     if (url.pathname === '/api/v1/users/self/profile') return json(fixture.profile);
     if (url.pathname === '/api/v1/courses') return json(fixture.courses);
     if (url.pathname === '/api/v1/users/self/groups') return json(fixture.groups);
+    if (url.pathname === '/api/v1/account_calendars') return json(fixture.accountCalendars);
     if (url.pathname === '/api/v1/courses/1/assignments/987') return json(fixture.assignmentDetail);
     if (url.pathname === '/api/v1/calendar_events') {
       calendarUrls.push(url);
@@ -48,15 +49,21 @@ test('loadCanvasSnapshot batches 11 contexts and retrieves effective assignment 
       assert.ok(contexts.length <= 10);
       assert.equal(url.searchParams.get('start_date'), '2026-03-01');
       assert.equal(url.searchParams.get('end_date'), '2027-03-31');
-      if (!contexts.includes('course_1')) return json([]);
-      return json(url.searchParams.get('type') === 'event' ? [fixture.event] : [fixture.assignment]);
+      if (url.searchParams.get('type') === 'event') {
+        return json([
+          ...(contexts.includes('course_1') ? [fixture.event] : []),
+          ...(contexts.includes('account_15') ? [fixture.accountEvent] : [])
+        ]);
+      }
+      return json(contexts.includes('course_1') ? [fixture.assignment] : []);
     }
     throw new Error(`Unexpected URL ${url}`);
   };
   const snapshot = await loadCanvasSnapshot({ fetchImpl, month: '2026-09' });
   assert.equal(snapshot.profile.id, 77);
-  assert.equal(snapshot.contexts.length, 11);
+  assert.equal(snapshot.contexts.length, 12);
+  assert.ok(snapshot.contexts.some(context => context.code === 'account_15' && context.name === 'College of Education'));
   assert.equal(calendarUrls.length, 4);
-  assert.equal(snapshot.events.length, 1);
+  assert.equal(snapshot.events.length, 2);
   assert.equal(snapshot.assignments[0].assignment.unlock_at, '2026-09-02T00:00:00-05:00');
 });

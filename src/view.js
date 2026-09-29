@@ -30,6 +30,11 @@ function safeCanvasLink(value) {
   }
 }
 
+function shortContext(name) {
+  const courseCode = String(name || '').match(/\b[A-Z]{2,6}\s*\d{3}\b/);
+  return courseCode ? courseCode[0] : String(name || 'Personal').slice(0, 18);
+}
+
 export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, now = new Date() }) {
   const document = host.ownerDocument;
   const root = host.shadowRoot || host.attachShadow({ mode: 'open' });
@@ -193,7 +198,8 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
       const shown = expandedWeeks.has(index) ? segments[index] : segments[index].slice(0, 4);
       shown.forEach((segment, barIndex) => {
         const item = byKey.get(segment.itemKey);
-        const bar = action(`Open ${item.title}`, `${item.completed ? '✓ ' : ''}${item.title}`, () => { selectedKey = item.key; notice = null; render(); }, `bar ${item.type}${item.completed ? ' completed' : ''}`);
+        const bar = action(`Open ${item.title} in ${item.contexts.join(', ')}`, '', () => { selectedKey = item.key; notice = null; render(); }, `bar ${item.type}${item.completed ? ' completed' : ''}`);
+        bar.append(el('span', 'context-tag', shortContext(item.contexts[0])), el('span', 'bar-title', `${item.completed ? '✓ ' : ''}${item.title}`));
         bar.dataset.itemKey = item.key;
         bar.style.gridColumn = `${segment.startColumn + 1} / ${segment.endColumn + 2}`;
         bar.style.gridRow = String(barIndex + 1);

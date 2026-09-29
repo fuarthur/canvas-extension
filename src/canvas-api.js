@@ -91,14 +91,19 @@ export async function loadCanvasSnapshot({ fetchImpl = fetch, month }) {
   if (!profile || !Number.isFinite(Number(profile.id))) {
     throw new CanvasApiError('DATA', 'Canvas did not identify the signed-in user.');
   }
-  const [courses, groups] = await Promise.all([
+  const [courses, groups, accountCalendars] = await Promise.all([
     fetchPages(fetchImpl, `${ORIGIN}/api/v1/courses?enrollment_state=active&per_page=100`),
-    fetchPages(fetchImpl, `${ORIGIN}/api/v1/users/self/groups?per_page=100`)
+    fetchPages(fetchImpl, `${ORIGIN}/api/v1/users/self/groups?per_page=100`),
+    fetchPages(fetchImpl, `${ORIGIN}/api/v1/account_calendars?per_page=100`)
   ]);
   const contexts = [
     { code: `user_${profile.id}`, name: 'Personal' },
     ...courses.map(course => ({ code: `course_${course.id}`, name: course.name })),
-    ...groups.map(group => ({ code: `group_${group.id}`, name: group.name }))
+    ...groups.map(group => ({ code: `group_${group.id}`, name: group.name })),
+    ...accountCalendars.filter(calendar => calendar.visible).map(calendar => ({
+      code: calendar.asset_string || `account_${calendar.id}`,
+      name: calendar.name
+    }))
   ];
   const uniqueContexts = [...new Map(contexts.map(context => [context.code, context])).values()];
   const requests = [];

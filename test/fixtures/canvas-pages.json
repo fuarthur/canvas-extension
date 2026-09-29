@@ -12,6 +12,15 @@
     { "id": 9, "name": "Course 9" }
   ],
   "groups": [{ "id": 44, "name": "Lab group" }],
+  "accountCalendars": [{ "id": 15, "name": "College of Education", "asset_string": "account_15", "visible": true }],
+  "accountEvent": {
+    "id": 6,
+    "title": "Advising",
+    "start_at": "2026-09-12T10:00:00-05:00",
+    "end_at": "2026-09-12T11:00:00-05:00",
+    "context_code": "account_15",
+    "html_url": "https://canvas.illinois.edu/calendar?event_id=6"
+  },
   "event": {
     "id": 5,
     "title": "Workshop",

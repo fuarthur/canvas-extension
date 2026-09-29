@@ -28,7 +28,9 @@ export const styles = `
   .day.outside { color: #a3afbd; background: #f7f9fb; }
   .day.today { color: #fff; background: #344f78; }
   .bars { display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); grid-auto-rows: 26px; gap: 3px 0; padding: 4px 5px 10px; min-height: 66px; }
-  .bar { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; border: 0; border-left: 4px solid #476ca3; border-radius: 5px; background: #e4edf9; color: #173358; padding: 3px 7px; font-size: 12px; font-weight: 700; margin: 0 2px; }
+  .bar { display: flex; align-items: center; gap: 5px; overflow: hidden; white-space: nowrap; text-align: left; border: 0; border-left: 4px solid #476ca3; border-radius: 5px; background: #e4edf9; color: #173358; padding: 3px 7px; font-size: 12px; font-weight: 700; margin: 0 2px; }
+  .context-tag { flex: none; max-width: 42%; overflow: hidden; text-overflow: ellipsis; font-size: 10px; opacity: .72; }
+  .bar-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .bar:hover, .bar:focus-visible { outline: 2px solid #1f4e8c; outline-offset: 1px; }
   .bar.completed { background: #e7ecea; color: #65736d; border-left-color: #83a090; text-decoration: line-through; }
   .bar.assignment { background: #e9e6fa; border-left-color: #6656a3; color: #3b326d; }

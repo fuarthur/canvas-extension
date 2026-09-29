@@ -15,7 +15,7 @@
 - Run only on `https://canvas.illinois.edu/calendar*`; do not write to Canvas APIs or mutate its calendar DOM.
 - Plan start precedence: explicit local date, then effective assignment `unlock_at`, then due date as a single-day item.
 - Completion is local and independent of Canvas submission and Planner state.
-- Include personal, active-course, and active-group contexts; send no more than 10 context codes per calendar request and follow all pagination links.
+- Include personal, active-course, active-group, and visible account-calendar contexts; send no more than 10 context codes per calendar request and follow all pagination links.
 - Query a window from the first day six calendar months before the viewed month through the last day six calendar months after it.
 - Keep user state separate by Canvas hostname, user ID, item type, and item ID; use the Canvas profile time zone if available.
 
@@ -47,9 +47,9 @@
 
 **Interfaces:** Produce `loadCanvasSnapshot({fetchImpl, month}): Promise<{profile, contexts, events, assignments, range}>`. `month` is `YYYY-MM`; `range` is `{startDate,endDate}`. Export `fetchPages(fetchImpl,url)` for tests and later use. Failure throws `CanvasApiError` with `code` equal to `AUTH`, `HTTP`, or `DATA`.
 
-- [ ] **Step 1: Write failing tests** for a profile, 11 combined contexts, event and assignment requests split into batches of at most 10, all response pages, the six-month window, HTML login response, and repeated next-page URL. Fixture responses must include an assignment with `assignment: null` so detail fallback is exercised.
+- [ ] **Step 1: Write failing tests** for a profile, 12 combined contexts (including a visible account calendar), event and assignment requests split into batches of at most 10, all response pages, the six-month window, HTML login response, and repeated next-page URL. Fixture responses must include an assignment with `assignment: null` so detail fallback is exercised.
 - [ ] **Step 2: Run `npm test -- test/canvas-api.test.js`**; expect failure because `src/canvas-api.js` does not exist.
-- [ ] **Step 3: Implement the exact exports** above. Use `GET /api/v1/users/self/profile`, `GET /api/v1/courses?enrollment_state=active`, `GET /api/v1/users/self/groups`, and `GET /api/v1/calendar_events` for each type and context batch. Request the effective assignment detail when the calendar record lacks dates. Reject non-JSON responses and non-OK statuses with typed errors. `package.json` provides `npm test` using `node --test` and pins esbuild and jsdom as dev dependencies; add the build script in Task 4.
+- [ ] **Step 3: Implement the exact exports** above. Use `GET /api/v1/users/self/profile`, `GET /api/v1/courses?enrollment_state=active`, `GET /api/v1/users/self/groups`, `GET /api/v1/account_calendars`, and `GET /api/v1/calendar_events` for each type and context batch. Request the effective assignment detail when the calendar record lacks dates. Reject non-JSON responses and non-OK statuses with typed errors. `package.json` provides `npm test` using `node --test` and pins esbuild and jsdom as dev dependencies; add the build script in Task 4.
 - [ ] **Step 4: Run `npm test -- test/canvas-api.test.js`**; expect all cases to pass.
 - [ ] **Step 5: Commit** the task files with `feat: read Canvas calendar data`.
 
