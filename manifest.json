@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Canvas Planning Calendar",
+  "version": "0.1.0",
+  "description": "A separate planning month view for Illinois Canvas calendar.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://canvas.illinois.edu/*"],
+  "action": { "default_title": "Toggle planning calendar" },
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [{
+    "matches": ["https://canvas.illinois.edu/calendar*"],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }]
+}
