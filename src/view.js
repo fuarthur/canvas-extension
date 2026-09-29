@@ -1,4 +1,4 @@
-import { monthWeeks, validDay, weekSegments } from './dates.js';
+import { dateKey, monthWeeks, validDay, weekSegments } from './dates.js';
 import { normalizeItems } from './model.js';
 import { styles } from './styles.js';
 
@@ -35,20 +35,21 @@ function shortContext(name) {
   return courseCode ? courseCode[0] : String(name || 'Personal').slice(0, 18);
 }
 
-export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, now = new Date() }) {
+export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, now = () => new Date() }) {
   const document = host.ownerDocument;
   const root = host.shadowRoot || host.attachShadow({ mode: 'open' });
   let open = false;
   let month = initialMonth;
   let snapshot = null;
   let store = null;
-  let userState = { starts: {}, completed: {}, lastMonth: null };
+  let userState = { starts: {}, completed: {} };
   let loading = false;
   let error = null;
   let selectedKey = null;
   let notice = null;
   let requestId = 0;
   const expandedWeeks = new Set();
+  const todayDay = () => dateKey(typeof now === 'function' ? now() : now, snapshot?.profile?.time_zone);
 
   function el(tag, className, text) {
     const element = document.createElement(tag);
@@ -68,6 +69,8 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
   function close() {
     open = false;
     requestId++;
+    loading = false;
+    error = null;
     host.remove();
     document.removeEventListener('keydown', onKeyDown);
   }
@@ -106,7 +109,6 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
     month = nextMonth;
     selectedKey = null;
     expandedWeeks.clear();
-    if (store) await store.setLastMonth(month);
     await load();
   }
 
@@ -185,11 +187,12 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
     const weeks = monthWeeks(month);
     const segments = weekSegments(items, weeks);
     const byKey = new Map(items.map(item => [item.key, item]));
+    const today = todayDay();
     weeks.forEach((week, index) => {
       const row = el('div', 'week');
       const days = el('div', 'days');
       week.forEach(day => {
-        const cell = el('div', `day${day.slice(0, 7) === month ? '' : ' outside'}${day === monthOf(now) + '-' + String(now.getDate()).padStart(2, '0') ? ' today' : ''}`, String(Number(day.slice(-2))));
+        const cell = el('div', `day${day.slice(0, 7) === month ? '' : ' outside'}${day === today ? ' today' : ''}`, String(Number(day.slice(-2))));
         cell.setAttribute('aria-label', day);
         days.append(cell);
       });
@@ -233,7 +236,7 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
     identity.append(el('p', 'eyebrow', 'Illinois Canvas'), el('h1', '', 'Planning calendar'), el('p', 'subline', 'Your dates and completion marks stay in this extension'));
     header.append(identity);
     const controls = el('div', 'controls');
-    controls.append(action('Previous month', '‹', () => navigate(shiftMonth(month, -1))), el('span', 'month-name', new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date(`${month}-01T12:00:00`))), action('Next month', '›', () => navigate(shiftMonth(month, 1))), action('Today', 'Today', () => navigate(monthOf(now))), action('Refresh calendar', 'Refresh', () => load(true)), action('Close planning calendar', '×', close, 'close'));
+    controls.append(action('Previous month', '‹', () => navigate(shiftMonth(month, -1))), el('span', 'month-name', new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date(`${month}-01T12:00:00`))), action('Next month', '›', () => navigate(shiftMonth(month, 1))), action('Today', 'Today', () => navigate(todayDay().slice(0, 7))), action('Refresh calendar', 'Refresh', () => load(true)), action('Close planning calendar', '×', close, 'close'));
     header.append(controls);
     shell.append(header);
     const body = el('div', 'content');
@@ -258,7 +261,7 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
     open = true;
     document.body.append(host);
     document.addEventListener('keydown', onKeyDown);
-    await load();
+    await load(true);
   }
 
   return { toggle, destroy: close };

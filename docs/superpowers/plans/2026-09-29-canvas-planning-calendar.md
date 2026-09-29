@@ -26,7 +26,7 @@
 - `manifest.json`, `src/background.js`, `src/content.js`: Chrome registration and action-to-overlay toggle.
 - `src/canvas-api.js`: authenticated, paginated read-only Canvas requests and context batching.
 - `src/model.js`, `src/dates.js`: normalized items, date precedence, month window and week segments.
-- `src/storage.js`: per-user local planning dates, completion and last month.
+- `src/storage.js`: per-user local planning dates and completion.
 - `src/view.js`, `src/styles.js`: isolated month UI, detail pane, controls and visible error states.
 - `test/*.test.js`, `test/fixtures/*.json`: API, date, state and rendering behavior using mock Canvas data.
 - `README.md`: unpacked installation, usage, data handling and live-login verification.
@@ -69,7 +69,7 @@
 
 **Files:** Create `src/storage.js`, `test/storage.test.js`.
 
-**Interfaces:** Produce `createPlannerStore(storageArea, hostname, userId)` with async `load(): {starts,completed,lastMonth}`, `setStart(itemKey, day|null)`, `setCompleted(itemKey, boolean)`, and `setLastMonth(month)` methods. The item key is `type:id`; store keys include hostname and user ID.
+**Interfaces:** Produce `createPlannerStore(storageArea, hostname, userId)` with async `load(): {starts,completed}`, `setStart(itemKey, day|null)`, and `setCompleted(itemKey, boolean)` methods. The item key is `type:id`; store keys include hostname and user ID. Separate keys prevent writes from different tabs overwriting one another.
 
 - [ ] **Step 1: Write failing tests** for reload persistence, clearing a manual date, toggling completion both ways, a different Canvas user on the same Chrome profile, and a different hostname.
 - [ ] **Step 2: Run `npm test -- test/storage.test.js`**; expect missing-module failure.
@@ -81,7 +81,7 @@
 
 **Files:** Create `manifest.json`, `scripts/build.mjs`, `src/background.js`, `src/content.js`, `src/view.js`, `src/styles.js`, `test/view.test.js`; modify `package.json`.
 
-**Interfaces:** Produce `mountPlanner({host,loadSnapshot,storeFactory,initialMonth,now}): {toggle(),destroy()}`. Here `loadSnapshot(month)` calls Task 1, `storeFactory(userId)` returns a Task 3 store, `initialMonth` is `YYYY-MM`, and `now` is a Date. `background.js` sends `{type:'PLANNER_TOGGLE'}` to the active calendar tab. `content.js` creates one host under `document.body`, attaches a Shadow DOM, and calls `mountPlanner`.
+**Interfaces:** Produce `mountPlanner({host,loadSnapshot,storeFactory,initialMonth,now}): {toggle(),destroy()}`. Here `loadSnapshot(month)` calls Task 1, `storeFactory(userId)` returns a Task 3 store, `initialMonth` is `YYYY-MM`, and `now` is an injectable current-time function or Date for tests. `background.js` sends `{type:'PLANNER_TOGGLE'}` to the active calendar tab. `content.js` creates one host under `document.body`, attaches a Shadow DOM, and calls `mountPlanner`.
 
 - [ ] **Step 1: Write failing tests** using a small DOM fixture for single-instance open/close, Escape, initial URL month, previous/next/today, span bars across weeks, detail link, start-date edit, completion toggle, error/retry, and unchanged native fixture nodes after close. Add a check that the built manifest targets only the Illinois calendar.
 - [ ] **Step 2: Run `npm test -- test/view.test.js`**; expect failure because the view module is absent.

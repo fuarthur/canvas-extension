@@ -11,13 +11,17 @@ function itemContexts(record, names) {
 }
 
 function makeEvent(record, names, state, timeZone) {
-  const startAt = record.start_at || record.end_at;
-  const endAt = record.end_at || record.start_at;
-  const startDay = dateKey(startAt, timeZone);
-  const rawEndDay = dateKey(endAt, timeZone);
-  if (!startDay) return null;
+  const validStartDay = dateKey(record.start_at, timeZone);
+  const validEndDay = dateKey(record.end_at, timeZone);
+  if (!validStartDay && !validEndDay) return null;
+  const startDay = validStartDay || validEndDay;
+  const rawEndDay = validEndDay || validStartDay;
+  const startAt = validStartDay ? record.start_at : record.end_at;
+  const endAt = validEndDay ? record.end_at : record.start_at;
   const key = `event:${record.id}`;
   const warnings = [];
+  if (record.start_at && !validStartDay) warnings.push('Canvas event has an invalid start date; showing its end date.');
+  if (record.end_at && !validEndDay) warnings.push('Canvas event has an invalid end date; showing its start date.');
   if (rawEndDay && rawEndDay < startDay) warnings.push('Canvas event ends before it starts.');
   return {
     key, type: 'event', title: record.title || 'Untitled event',

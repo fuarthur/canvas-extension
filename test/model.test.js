@@ -62,3 +62,11 @@ test('event missing its end date becomes a one-day item', () => {
   const [item] = normalizeItems(snapshot({ events: [event], assignments: [] }), state);
   assert.equal(item.endDay, item.startDay);
 });
+
+test('event with malformed start retains its valid end date with a warning', () => {
+  const event = { ...fixture.event, start_at: 'bad', end_at: '2026-09-20T10:00:00-05:00' };
+  const [item] = normalizeItems(snapshot({ events: [event], assignments: [] }), state);
+  assert.equal(item.startDay, '2026-09-20');
+  assert.equal(item.endDay, '2026-09-20');
+  assert.ok(item.warnings.length > 0);
+});

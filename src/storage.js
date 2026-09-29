@@ -1,37 +1,28 @@
 export function createPlannerStore(storageArea, hostname, userId) {
-  const key = `canvas-planner:${hostname}:${userId}`;
-
-  async function load() {
-    const saved = (await storageArea.get(key))[key] || {};
-    return {
-      starts: { ...(saved.starts || {}) },
-      completed: { ...(saved.completed || {}) },
-      lastMonth: saved.lastMonth || null
-    };
-  }
-
-  async function update(change) {
-    const state = await load();
-    change(state);
-    await storageArea.set({ [key]: state });
-  }
+  const prefix = `canvas-planner:${hostname}:${userId}:`;
+  const startKey = itemKey => `${prefix}start:${itemKey}`;
+  const completedKey = itemKey => `${prefix}completed:${itemKey}`;
 
   return {
-    load,
+    async load() {
+      const entries = await storageArea.get(null);
+      const state = { starts: {}, completed: {} };
+      for (const [key, value] of Object.entries(entries)) {
+        if (key.startsWith(`${prefix}start:`) && typeof value === 'string') {
+          state.starts[key.slice(`${prefix}start:`.length)] = value;
+        } else if (key.startsWith(`${prefix}completed:`) && value === true) {
+          state.completed[key.slice(`${prefix}completed:`.length)] = true;
+        }
+      }
+      return state;
+    },
     async setStart(itemKey, day) {
-      await update(state => {
-        if (day == null) delete state.starts[itemKey];
-        else state.starts[itemKey] = day;
-      });
+      if (day == null) await storageArea.remove(startKey(itemKey));
+      else await storageArea.set({ [startKey(itemKey)]: day });
     },
     async setCompleted(itemKey, completed) {
-      await update(state => {
-        if (completed) state.completed[itemKey] = true;
-        else delete state.completed[itemKey];
-      });
-    },
-    async setLastMonth(month) {
-      await update(state => { state.lastMonth = month; });
+      if (completed) await storageArea.set({ [completedKey(itemKey)]: true });
+      else await storageArea.remove(completedKey(itemKey));
     }
   };
 }

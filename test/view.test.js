@@ -109,3 +109,55 @@ test('failed loading shows retry and succeeds on the next request', async () => 
   assert.equal(calls, 2);
   assert.match(host.shadowRoot.textContent, /September 2026/);
 });
+
+test('reopening verifies the current Canvas user before showing local state', async () => {
+  let profileId = 77;
+  const stores = new Map();
+  const dom = new JSDOM('<main id="native">Canvas calendar</main>', { url: 'https://canvas.illinois.edu/calendar' });
+  const host = dom.window.document.createElement('div');
+  const snapshot = () => ({ profile: { ...fixture.profile, id: profileId }, contexts: [], events: [fixture.event], assignments: [], range: { startDate: '2026-03-01', endDate: '2027-03-31' } });
+  const planner = mountPlanner({ host, loadSnapshot: async () => snapshot(), storeFactory: id => {
+    if (!stores.has(id)) stores.set(id, { async load() { return { starts: {}, completed: { 'event:5': id === 77 }, lastMonth: null }; }, async setCompleted() {} });
+    return stores.get(id);
+  }, initialMonth: '2026-09', now: new Date('2026-09-15T12:00:00Z') });
+  await planner.toggle();
+  assert.match(host.shadowRoot.querySelector('[data-item-key="event:5"]').textContent, /✓/);
+  await planner.toggle();
+  profileId = 88;
+  await planner.toggle();
+  assert.doesNotMatch(host.shadowRoot.querySelector('[data-item-key="event:5"]').textContent, /✓/);
+  assert.ok(stores.has(88));
+});
+
+test('closing an in-flight refresh cannot leave reopening stuck loading', async () => {
+  let resolveRefresh;
+  let calls = 0;
+  const { host, planner, click } = setup(async () => {
+    calls++;
+    if (calls === 2) return new Promise(resolve => { resolveRefresh = resolve; });
+    return { profile: fixture.profile, contexts: [], events: [], assignments: [], range: { startDate: '2026-03-01', endDate: '2027-03-31' } };
+  });
+  await planner.toggle();
+  host.shadowRoot.querySelector('[aria-label="Refresh calendar"]').click();
+  await click('Close planning calendar');
+  await planner.toggle();
+  resolveRefresh({ profile: fixture.profile, contexts: [], events: [], assignments: [], range: { startDate: '2026-03-01', endDate: '2027-03-31' } });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.doesNotMatch(host.shadowRoot.textContent, /Loading Canvas calendar/);
+});
+
+test('Today and day highlight use the Canvas profile time zone', async () => {
+  const dom = new JSDOM('<main>Canvas calendar</main>', { url: 'https://canvas.illinois.edu/calendar' });
+  const host = dom.window.document.createElement('div');
+  let current = new Date('2026-10-01T02:00:00Z');
+  const planner = mountPlanner({ host, loadSnapshot: async () => ({ profile: { ...fixture.profile, time_zone: 'America/Chicago' }, contexts: [], events: [], assignments: [], range: { startDate: '2026-03-01', endDate: '2027-03-31' } }), storeFactory: () => ({ async load() { return { starts: {}, completed: {} }; }, async setLastMonth() {} }), initialMonth: '2026-10', now: () => current });
+  await planner.toggle();
+  host.shadowRoot.querySelector('[aria-label="Today"]').click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.match(host.shadowRoot.textContent, /September 2026/);
+  assert.equal(host.shadowRoot.querySelector('.day.today')?.getAttribute('aria-label'), '2026-09-30');
+  current = new Date('2026-10-02T02:00:00Z');
+  host.shadowRoot.querySelector('[aria-label="Today"]').click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(host.shadowRoot.querySelector('.day.today')?.getAttribute('aria-label'), '2026-10-01');
+});

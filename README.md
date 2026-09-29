@@ -11,7 +11,7 @@ npm ci
 npm run build
 ```
 
-在 Chrome 打开 `chrome://extensions`，启用“开发者模式”，选择“加载已解压的扩展程序”，并选中本项目的 `dist` 文件夹。打开 [Illinois Canvas 日历](https://canvas.illinois.edu/calendar)，点击工具栏中的 **Canvas Planning Calendar** 图标。修改源码后重新运行 `npm run build`，再到扩展页面点击刷新。
+在 Chrome 打开 `chrome://extensions`，启用“开发者模式”，选择“加载已解压的扩展程序”，并选中本项目的 `dist` 文件夹。打开 [Illinois Canvas 日历](https://canvas.illinois.edu/calendar)，点击工具栏中的 **Canvas Planning Calendar** 图标。如果日历页在安装前已经打开，先刷新该页。修改源码后重新运行 `npm run build`，再到扩展页面点击刷新，并刷新日历页。
 
 ## 使用
 
@@ -20,7 +20,7 @@ npm run build
 - 在项目详情里勾选“Complete in this extension”可标记或取消完成。这只是个人规划状态，不代表在 Canvas 交了作业，也不会改变 Canvas Planner。
 - 上月、下月、今天、刷新按钮位于顶部；项目过多的周可点“more”展开。点击详情中的链接可打开原始 Canvas 项目。
 
-扩展通过当前登录会话**只读**地获取个人、活跃课程、小组和可见账号日历的数据。计划开始日、完成状态和最近浏览月份保存在 Chrome 的 `chrome.storage.local`，按 Canvas 用户账号隔离；扩展不把日历内容发送到第三方服务。日期按 Canvas 用户时区展示，若 Canvas 未提供时区则使用浏览器时区。
+扩展通过当前登录会话**只读**地获取个人、活跃课程、小组和可见账号日历的数据。计划开始日和完成状态保存在 Chrome 的 `chrome.storage.local`，按 Canvas 用户账号隔离；扩展不把日历内容发送到第三方服务。当前页面关闭并重开规划视图时会保留浏览月份，刷新页面后则重新按 Canvas 日历 URL 定位。日期按 Canvas 用户时区展示，若 Canvas 未提供时区则使用浏览器时区。
 
 ## 验证与限制
 

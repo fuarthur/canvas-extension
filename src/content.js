@@ -9,8 +9,7 @@ if (location.pathname.startsWith('/calendar')) {
     host,
     loadSnapshot: month => loadCanvasSnapshot({ fetchImpl: fetch, month }),
     storeFactory: userId => createPlannerStore(chrome.storage.local, location.hostname, userId),
-    initialMonth: monthFromCalendarHash(location.hash, new Date()),
-    now: new Date()
+    initialMonth: monthFromCalendarHash(location.hash, new Date())
   });
   chrome.runtime.onMessage.addListener(message => {
     if (message?.type === 'PLANNER_TOGGLE') planner.toggle();
