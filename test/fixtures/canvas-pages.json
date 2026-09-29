@@ -1,0 +1,40 @@
+{
+  "profile": { "id": 77, "time_zone": "America/Chicago" },
+  "courses": [
+    { "id": 1, "name": "Course 1" },
+    { "id": 2, "name": "Course 2" },
+    { "id": 3, "name": "Course 3" },
+    { "id": 4, "name": "Course 4" },
+    { "id": 5, "name": "Course 5" },
+    { "id": 6, "name": "Course 6" },
+    { "id": 7, "name": "Course 7" },
+    { "id": 8, "name": "Course 8" },
+    { "id": 9, "name": "Course 9" }
+  ],
+  "groups": [{ "id": 44, "name": "Lab group" }],
+  "event": {
+    "id": 5,
+    "title": "Workshop",
+    "start_at": "2026-09-10T09:00:00-05:00",
+    "end_at": "2026-09-12T10:00:00-05:00",
+    "context_code": "course_1",
+    "html_url": "https://canvas.illinois.edu/calendar?event_id=5"
+  },
+  "assignment": {
+    "id": "assignment_987",
+    "title": "Essay",
+    "start_at": "2026-09-20T23:59:00-05:00",
+    "end_at": "2026-09-20T23:59:00-05:00",
+    "context_code": "course_1",
+    "html_url": "https://canvas.illinois.edu/courses/1/assignments/987",
+    "assignment": null
+  },
+  "assignmentDetail": {
+    "id": 987,
+    "course_id": 1,
+    "name": "Essay",
+    "due_at": "2026-09-20T23:59:00-05:00",
+    "unlock_at": "2026-09-02T00:00:00-05:00",
+    "html_url": "https://canvas.illinois.edu/courses/1/assignments/987"
+  }
+}
