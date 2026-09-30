@@ -178,7 +178,8 @@ const templates = {
   'Canvas request failed ({status}).':'Canvas 请求失败（{status}）。',
   'Some calendar data could not be loaded because Canvas denied access: {names}.':'Canvas 拒绝访问部分日历，未能加载：{names}。',
   '{message} Showing your last loaded data; refresh to verify current deadlines.':'{message} 正在显示上次加载的数据，请刷新以验证当前截止时间。',
-  '{kind} · Canvas denied access':'{kind} · Canvas 拒绝访问'
+  '{kind} · Canvas denied access':'{kind} · Canvas 拒绝访问',
+  '{message} Could not read local planning data: {detail}':'{message} 无法读取本地规划数据：{detail}'
 };
 const escape = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const compiled = Object.entries(templates).map(([source, target]) => {
@@ -194,6 +195,10 @@ const compiled = Object.entries(templates).map(([source, target]) => {
 const localValues = new Set(['duration','estimateDuration','peak','before','after','dayName','dayLabel','estimateLabel','kind','message']);
 export function translate(document, source) {
   if (Array.isArray(source)) return source.map(value => translate(document, value)).join(' ');
+  if (source && typeof source === 'object' && typeof source.key === 'string') {
+    const template = getLanguage(document) === 'zh-CN' ? (templates[source.key] || zh[source.key] || source.key) : source.key;
+    return template.replace(/\{(\w+)\}/g, (_, key) => String(source.values[key] ?? ''));
+  }
   if (source == null || getLanguage(document) !== 'zh-CN') return source;
   const value = String(source);
   if (Object.hasOwn(zh, value)) return zh[value];

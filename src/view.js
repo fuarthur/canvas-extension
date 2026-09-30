@@ -22,7 +22,7 @@ export function nativeCalendarSelection(document) {
 }
 
 export function mountCalendarEntry({ document, onOpen }) {
-  const button = ui(document).el('button','btn','Planning');
+  const button = ui(document).el('button','btn','Planning / 规划',true);
   button.dataset.planningEntry='';
   button.type = 'button';
   button.className = 'btn';
@@ -243,7 +243,7 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
   }
 
   async function changeTab(tab) {
-    if(activeTab==='planner'&&tab!=='planner'&&planController&&!await planController.requestLeave())return;
+    if(activeTab==='planner'&&tab!=='planner'&&tab!=='settings'&&planController&&!await planController.requestLeave())return;
     activeTab = tab;
     selectedKey = null;
     notice = null;
@@ -330,6 +330,7 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
       shown.forEach((segment, barIndex) => {
         const item = byKey.get(segment.itemKey);
         const bar = action(`Open ${item.title} in ${item.contexts.join(', ')}`, '', () => { selectedKey = item.key; notice = null; render(); }, `bar ${item.type}${item.completed ? ' completed' : ''}`);
+        setLabel(bar,{key:'Open {title} in {contexts}',values:{title:item.title,contexts:item.contexts.join(', ')}});
         bar.append(el('span', 'context-tag', shortContext(item.contexts[0]),true), el('span', 'bar-title', `${item.completed ? '✓ ' : ''}${item.title}`,true));
         bar.dataset.itemKey = item.key;
         bar.style.gridColumn = `${segment.startColumn + 1} / ${segment.endColumn + 2}`;
@@ -355,7 +356,7 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
   function render() {
     if (!open) return;
     setLanguage(document,planningState.settings.language);
-    const entry=document.querySelector('[data-planning-entry]');if(entry)localizeTree(entry);
+    const entry=document.querySelector('[data-planning-entry]');if(entry){setText(entry,'Planning');localizeTree(entry);}
     const style = el('style', '', styles);
     const backdrop = el('div', 'backdrop');
     const shell = el('section', 'shell');

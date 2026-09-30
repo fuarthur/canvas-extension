@@ -20,11 +20,11 @@ test('language preference survives stale settings saves and is isolated per Canv
  await assert.rejects(store.setLanguage('invalid'));assert.equal((await store.loadPlanningState()).settings.language,'zh-CN');
 });
 
-async function setup(){
+async function setup({title='Settings',contextName='Today'}={}){
  const dom=new JSDOM('<main>Native Calendar</main><div class="calendar_view_buttons" role="tablist"></div>',{url:'https://canvas.illinois.edu/calendar'});
  const document=dom.window.document,host=document.createElement('div'),area=memoryStorage();
  const store=createPlannerStore(area,'canvas.illinois.edu',77);let calls=0;
- const planner=mountPlanner({host,storeFactory:()=>store,initialMonth:'2026-10',now:()=>new Date('2026-10-01T12:00:00Z'),loadSnapshot:async()=>{calls++;return {profile:{id:77,time_zone:'America/Chicago'},contexts:[{code:'course_456',name:'Today'}],events:[],assignments:[{id:'assignment_1',title:'Settings',context_code:'course_456',assignment:{due_at:'2026-10-03T23:59:00-05:00'}}],range:{startDate:'2026-10-01',endDate:'2026-12-31'}};}});
+ const planner=mountPlanner({host,storeFactory:()=>store,initialMonth:'2026-10',now:()=>new Date('2026-10-01T12:00:00Z'),loadSnapshot:async()=>{calls++;return {profile:{id:77,time_zone:'America/Chicago'},contexts:[{code:'course_456',name:contextName}],events:[],assignments:[{id:'assignment_1',title,context_code:'course_456',assignment:{due_at:'2026-10-03T23:59:00-05:00'}}],range:{startDate:'2026-10-01',endDate:'2026-12-31'}};}});
  const removeEntry=mountCalendarEntry({document,onOpen:()=>{}});await planner.show();
  const root=host.shadowRoot,click=async id=>{control(root,id).click();await settle();};
  const change=async(id,value)=>{const n=control(root,id);assert.ok(n,`Missing ${id}`);n.value=value;n.dispatchEvent(new dom.window.Event('change',{bubbles:true}));await settle();};
@@ -96,4 +96,31 @@ test('Chinese comparisons keep archived names literal in pickers, summaries, leg
  assert.deepEqual([...control(root,'Saved plans').options].slice(1).map(n=>n.textContent),['Today','Settings']);assert.equal(control(root,'Task course').options[1].textContent,'Today');
  control(root,'Compare Today').click();control(root,'Compare Settings').click();assert.deepEqual([...root.querySelectorAll('.plan-comparison .summary-card strong')].map(n=>n.textContent),['Today','Settings']);assert.deepEqual([...root.querySelectorAll('.plan-comparison .chart-legend span')].map(n=>n.textContent),['Today','Settings']);assert.match(root.querySelector('.plan-comparison circle').getAttribute('aria-label'),/^Today, .*0 分钟/);
  controller.destroy();dom.window.close();
+});
+
+test('a name being typed remains dirty and survives another page changing the language before blur',()=>{
+ const dom=new JSDOM('<main/>'),document=dom.window.document,original=plan();const state=planningState({plans:{[original.id]:original}});let dirty=false;
+ const controller=createPlannerController({document,state,items:[task()],now:()=>new Date('2026-10-01T12:00:00Z'),timeZone:'America/Chicago',loadedRange:original.range,onDirtyChange:value=>{dirty=value;},planClient:{}});const root=controller.render();document.querySelector('main').append(root);
+ const name=control(root,'Plan name');name.focus();name.value='Unsaved typed name';name.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
+ controller.setData({state:{...state,settings:{...state.settings,language:'zh-CN'}}});assert.equal(control(root,'Plan name').value,'Unsaved typed name');assert.equal(dirty,true);
+ controller.destroy();dom.window.close();
+});
+
+test('the actual Settings route can switch language while keeping a planner draft unsaved',async()=>{
+ const s=await setup();await s.click('Planner view');await s.click('New plan');await s.change('Plan name','My unfinished plan');await s.click('Calendar settings');
+ assert.ok(control(s.root,'Interface language'),'Settings should suspend, not discard or save, the draft');await s.change('Interface language','zh-CN');await s.click('Planner view');
+ assert.equal(control(s.root,'Plan name').value,'My unfinished plan');assert.match(s.root.textContent,/尚未保存/);assert.deepEqual((await s.store.loadPlanningState()).plans,{});s.destroy();
+});
+
+test('Chinese accessible task labels preserve titles containing template delimiters',async()=>{
+ const s=await setup({title:'Essay in Class',contextName:'Settings'});await s.click('Calendar settings');await s.change('Interface language','zh-CN');await s.click('Planning calendar view');
+ // Task titles and calendar names are passed separately, so " in " is literal.
+ assert.equal(s.root.querySelector('[data-item-key="assignment:1"]').getAttribute('aria-label'),'打开 Settings 中的 Essay in Class');s.destroy();
+ const dom=new JSDOM('<main/>'),document=dom.window.document;const item=task({title:'Essay in Class',contexts:['Settings']});const original=plan({tasks:{[item.key]:{...item,estimateMinutes:60,singleSession:false,completedAtSave:false}}});const state=planningState({settings:settings({language:'zh-CN'}),plans:{[original.id]:original}});
+ const controller=createPlannerController({document,state,items:[item],now:()=>new Date('2026-10-01T12:00:00Z'),timeZone:'America/Chicago',loadedRange:original.range,planClient:{}});const root=controller.render();assert.equal(root.querySelector('.task-title').getAttribute('aria-label'),'打开 Essay in Class');controller.destroy();dom.window.close();
+});
+
+test('before the account is identified the native entry is bilingual without changing native tabs',()=>{
+ const dom=new JSDOM('<div class="calendar_view_buttons" role="tablist"><button role="tab">Month</button></div>');const document=dom.window.document;const remove=mountCalendarEntry({document,onOpen:()=>{}});
+ assert.equal(document.querySelector('[data-planning-entry]').textContent,'Planning / 规划');assert.equal(document.querySelector('[role="tab"]').textContent,'Month');remove();dom.window.close();
 });

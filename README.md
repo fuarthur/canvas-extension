@@ -1,6 +1,6 @@
 # Canvas Planning Calendar
 
-适用于 `canvas.illinois.edu/calendar` 的 Chrome 扩展。在 Canvas 的 Week / Month / Agenda 旁点击 **Planning**，即可打开当前月份的独立规划月视图；按 Escape 或点右上角关闭，即可回到原视图。工具栏扩展图标也可切换规划视图。扩展添加自己的入口和规划容器，不改写原日历内容或向 Canvas 提交更改。
+适用于 `canvas.illinois.edu/calendar` 的 Chrome 扩展。在 Canvas 的 Week / Month / Agenda 旁点击 **Planning / 规划**，即可打开当前月份的独立规划月视图；按 Escape 或点右上角关闭，即可回到原视图。工具栏扩展图标也可切换规划视图。扩展添加自己的入口和规划容器，不改写原日历内容或向 Canvas 提交更改。
 
 ## 安装
 
@@ -11,13 +11,13 @@ npm ci
 npm run build
 ```
 
-在 Chrome 打开 `chrome://extensions`，启用“开发者模式”，选择“加载已解压的扩展程序”，并选中本项目的 `dist` 文件夹。打开 [Illinois Canvas 日历](https://canvas.illinois.edu/calendar)，点击视图切换栏中的 **Planning**。如果日历页在安装前已经打开，先刷新该页。修改源码后重新运行 `npm run build`，再到扩展页面点击刷新，并刷新日历页。
+在 Chrome 打开 `chrome://extensions`，启用“开发者模式”，选择“加载已解压的扩展程序”，并选中本项目的 `dist` 文件夹。打开 [Illinois Canvas 日历](https://canvas.illinois.edu/calendar)，点击视图切换栏中的 **Planning / 规划**。如果日历页在安装前已经打开，先刷新该页。修改源码后重新运行 `npm run build`，再到扩展页面点击刷新，并刷新日历页。
 
 ## 使用
 
 规划页面包含 Calendar（日历）、Workload（工作量）、Planner（计划）、Settings（设置）四个标签。切换标签和估时指标使用已加载数据，不额外请求 Canvas。
 
-在 **Settings → Language / 语言** 中选择 **English** 或 **简体中文**，界面会立即切换，并按当前 Canvas 账号记住选择；首次使用默认英文。切换语言不会提交尚未保存的规则、丢失计划草稿或改写 Canvas 的任务标题、课程名称和用户输入内容。原生日历保持原样。
+在 **Settings → Language / 语言** 中选择 **English** 或 **简体中文**，界面会立即切换，并按当前 Canvas 账号记住选择；首次使用默认英文。编辑计划时可进入 Settings 切换语言，再返回 Planner 继续编辑。切换语言不会提交尚未保存的规则、丢失计划草稿或改写 Canvas 的任务标题、课程名称和用户输入内容。原生日历保持原样。
 
 
 - 活动按 Canvas 的真实开始和结束日期显示为跨日色条。
@@ -60,4 +60,4 @@ Illinois Canvas 的日历需要校园登录。自动化测试覆盖 API 结构�
 
 当前版本只支持 Illinois Canvas，不显示无截止日的项目，也不跨设备同步本地数据。排程并不保证全局最优；连续任务最多探索 2000 个状态、均衡最多 2000 次改善、单次计算默认限时 5 秒。没有找到完整结果不表示数学上无解，可能需要调整容量、范围或连续完成要求。未知/未加载任务、过期快照和无法满足的约束会阻止完整成功状态；任务数据变化后可明确更新计划快照。
 
-本次版本的 119 项自动测试覆盖估时规则、存档并发、计划编辑、容量、开放/截止、夏令时、后台取消、跨账号恢复、图表交互与中英文切换、语言持久化、未保存编辑保留。已登录 Chrome 的真实页面验证记录见 [验证记录](docs/superpowers/reviews/2026-09-30-workload-and-planner.md)。
+本次版本的 123 项自动测试覆盖估时规则、存档并发、计划编辑、容量、开放/截止、夏令时、后台取消、跨账号恢复、图表交互与中英文切换、语言持久化、未保存编辑保留。已登录 Chrome 的真实页面验证记录见 [验证记录](docs/superpowers/reviews/2026-09-30-workload-and-planner.md)。
