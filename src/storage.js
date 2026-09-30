@@ -1,3 +1,4 @@
+import {validLanguage} from './i18n.js';
 import {defaultSettings,validateSettings,validateSchedule,validMinutes} from './planning-settings.js';
 import {validDay,daysBetween} from './dates.js';
 export function createPlannerStore(storageArea, hostname, userId) {
@@ -35,6 +36,7 @@ export function createPlannerStore(storageArea, hostname, userId) {
         const checked=validateSettings(entries[`${prefix}settings:v1`]);
         if(checked.value)state.settings=checked.value;else state.warnings.push('Saved planning settings are invalid; using defaults.');
       }
+      state.settings.language=validLanguage(entries[`${prefix}language`])?entries[`${prefix}language`]:'en';
       for(const [key,value] of Object.entries(entries)){
         if(!key.startsWith(prefix))continue;
         const suffix=key.slice(prefix.length);
@@ -47,6 +49,7 @@ export function createPlannerStore(storageArea, hostname, userId) {
       }
       return state;
     },
+    async setLanguage(language){if(!validLanguage(language))throw new Error('Unsupported language.');await storageArea.set({[`${prefix}language`]:language});},
     async setSettings(settings){const checked=validateSettings(settings);if(!checked.value)throw new Error(checked.errors.join(' '));await storageArea.set({[`${prefix}settings:v1`]:checked.value});},
     async setEstimate(itemKey,minutes){if(minutes==null)await storageArea.remove(`${prefix}estimate:${itemKey}`);else {if(!validMinutes(minutes))throw new Error('Estimate must be 1–1440 whole minutes.');await storageArea.set({[`${prefix}estimate:${itemKey}`]:minutes});}},
     async setSingleSession(itemKey,value){if(value)await storageArea.set({[`${prefix}single-session:${itemKey}`]:true});else await storageArea.remove(`${prefix}single-session:${itemKey}`);},

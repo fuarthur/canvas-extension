@@ -1,5 +1,5 @@
 import {validDay} from './dates.js';
-export function defaultSettings(){return {schemaVersion:1,defaultMinutes:60,yellowFrom:3,redFrom:6,rules:[],schedule:{weekdays:Array.from({length:7},()=>({start:'09:00',end:'21:00',maxMinutes:240})),exceptions:{},horizonDays:28}};}
+export function defaultSettings(){return {schemaVersion:1,language:'en',defaultMinutes:60,yellowFrom:3,redFrom:6,rules:[],schedule:{weekdays:Array.from({length:7},()=>({start:'09:00',end:'21:00',maxMinutes:240})),exceptions:{},horizonDays:28}};}
 export const validMinutes=value=>Number.isInteger(value)&&value>=1&&value<=1440;
 export const timeMinutes=value=>/^([01]\d|2[0-3]):[0-5]\d$/.test(value||'')?Number(value.slice(0,2))*60+Number(value.slice(3)):null;
 export function validateSchedule(schedule){

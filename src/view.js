@@ -1,3 +1,5 @@
+import {ui} from './ui.js';
+import {getLanguage,setLanguage,setLabel,setText,translate,intlLocale,localizeTree} from './i18n.js';
 import { dateKey, monthWeeks, validDay, weekSegments, addDays } from './dates.js';
 import { normalizeItems } from './model.js';
 import { styles } from './styles.js';
@@ -20,11 +22,11 @@ export function nativeCalendarSelection(document) {
 }
 
 export function mountCalendarEntry({ document, onOpen }) {
-  const button = document.createElement('button');
+  const button = ui(document).el('button','btn','Planning');
+  button.dataset.planningEntry='';
   button.type = 'button';
   button.className = 'btn';
-  button.textContent = 'Planning';
-  button.setAttribute('aria-label', 'Open planning calendar');
+  setLabel(button,'Open planning calendar');
   button.setAttribute('aria-haspopup', 'dialog');
   button.addEventListener('click', event => {
     // Canvas delegates its native view switching to this button group.
@@ -96,17 +98,14 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
   const expandedWeeks = new Set();
   const todayDay = () => dateKey(typeof now === 'function' ? now() : now, snapshot?.profile?.time_zone);
 
-  function el(tag, className, text) {
-    const element = document.createElement(tag);
-    if (className) element.className = className;
-    if (text != null) element.textContent = text;
-    return element;
-  }
+  const {el}=ui(document);
+  let settingsEditor=null,settingsEditorKey='';
 
   function action(label, text, handler, className = 'control') {
     const button = el('button', className, text);
     button.type = 'button';
-    button.setAttribute('aria-label', label);
+    setLabel(button,label);
+    button.dataset.controlId=label;
     button.addEventListener('click', event=>{try{Promise.resolve(handler(event)).catch(cause=>{notice=cause.message||'This change could not be saved.';render();});}catch(cause){notice=cause.message;render();}});
     return button;
   }
@@ -176,11 +175,11 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
 
   function detail(item) {
     const panel = el('aside', 'detail');
-    panel.setAttribute('aria-label', 'Item details');
+    setLabel(panel,'Item details');
     const head = el('div', 'detail-head');
-    head.append(el('h2', '', item.title), action('Close details', '×', () => { selectedKey = null; render(); }, 'close'));
+    head.append(el('h2', '', item.title,true), action('Close details', '×', () => { selectedKey = null; render(); }, 'close'));
     panel.append(head);
-    panel.append(el('p', '', item.contexts.join(' · ') || 'Personal'));
+    panel.append(el('p', '', item.contexts.join(' · ') || translate(document,'Personal'),true));
     const facts = el('dl');
     for (const [label, value] of [['Starts', item.startAt || item.startDay], ['Ends', item.endAt || item.endDay]]) {
       facts.append(el('dt', '', label), el('dd', '', value));
@@ -192,7 +191,7 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
       input.type = 'date';
       input.value = userState.starts[item.key] || item.startDay;
       input.max = item.endDay;
-      input.setAttribute('aria-label', 'Plan start date');
+      setLabel(input,'Plan start date');input.dataset.controlId='Plan start date';
       input.addEventListener('change', async () => {
         if (!validDay(input.value) || input.value > item.endDay) {
           notice = 'Choose a valid date no later than the due date.';
@@ -212,22 +211,22 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
     }
     const estimate=resolveEstimate(item,planningState);
     const estimateField=el('label','field','Estimated effort (minutes)');
-    const estimateInput=el('input');estimateInput.type='number';estimateInput.min='1';estimateInput.max='1440';estimateInput.value=String(estimate.minutes);estimateInput.setAttribute('aria-label','Estimated effort minutes');
+    const estimateInput=el('input');estimateInput.type='number';estimateInput.min='1';estimateInput.max='1440';estimateInput.value=String(estimate.minutes);setLabel(estimateInput,'Estimated effort minutes');estimateInput.dataset.controlId='Estimated effort minutes';
     estimateInput.addEventListener('change',async()=>{try{await planningStore.setEstimate(item.key,Number(estimateInput.value));await refreshLocal();}catch(cause){notice=cause.message;render();}});
     estimateField.append(estimateInput);panel.append(estimateField,el('p','hint',estimate.label),action('Use automatic estimate','Use rule / default',async()=>{await planningStore.setEstimate(item.key,null);await refreshLocal();},'text-button'));
     if(item.type==='assignment'){
-      const once=el('label','check');const box=el('input');box.type='checkbox';box.checked=Boolean(planningState.singleSessions[item.key]);box.setAttribute('aria-label','Must finish in one session');box.addEventListener('change',async()=>{await mutateLocal(()=>planningStore.setSingleSession(item.key,box.checked));});once.append(box,document.createTextNode('Must finish in one session'));panel.append(once);
+      const once=el('label','check');const box=el('input');box.type='checkbox';box.checked=Boolean(planningState.singleSessions[item.key]);setLabel(box,'Must finish in one session');box.dataset.controlId='Must finish in one session';box.addEventListener('change',async()=>{await mutateLocal(()=>planningStore.setSingleSession(item.key,box.checked));});once.append(box,document.createTextNode(translate(document,'Must finish in one session')));panel.append(once);
     }
     const check = el('label', 'check');
     const checkbox = el('input');
     checkbox.type = 'checkbox';
     checkbox.checked = item.completed;
     checkbox.disabled = Boolean(item.canvasCompleted);
-    checkbox.setAttribute('aria-label', 'Mark complete');
+    setLabel(checkbox,'Mark complete');checkbox.dataset.controlId='Mark complete';
     checkbox.addEventListener('change', async () => {
       await completeItem(item.key, checkbox.checked);
     });
-    check.append(checkbox, document.createTextNode(item.canvasCompleted ? 'Completed in Canvas' : 'Complete in this extension'));
+    check.append(checkbox, document.createTextNode(translate(document,item.canvasCompleted ? 'Completed in Canvas' : 'Complete in this extension')));
     panel.append(check);
     if (notice) panel.append(el('p', 'notice', notice));
     for (const warning of item.warnings) panel.append(el('p', 'notice', warning));
@@ -237,7 +236,7 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
       link.href = url;
       link.target = '_blank';
       link.rel = 'noopener noreferrer';
-      link.setAttribute('aria-label', 'Open in Canvas');
+      setLabel(link,'Open in Canvas');
       panel.append(link);
     }
     return panel;
@@ -266,12 +265,12 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
       input.type = 'checkbox';
       input.checked = draftSelection.has(context.code);
       input.dataset.contextCode = context.code;
-      input.setAttribute('aria-label', `Load ${context.name || context.code}`);
+      setLabel(input,`Load ${context.name || context.code}`);
       input.addEventListener('change', () => {
         if (input.checked) draftSelection.add(context.code); else draftSelection.delete(context.code);
       });
       const label = el('div');
-      label.append(el('span', '', context.name || context.code));
+      label.append(el('span', '', context.name || context.code,true));
       const kind = context.code.split('_')[0];
       label.append(el('p', 'hint', `${{ user: 'Personal', course: 'Course', group: 'Group', account: 'Account' }[kind] || 'Calendar'}${snapshot.unavailableCalendars?.includes(context.code) ? ' · Canvas denied access' : ''}`));
       row.append(input, label);
@@ -294,7 +293,13 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
     });
     save.disabled = saving;
     panel.append(save, action('Retry unavailable calendars', 'Retry calendar access', () => load(true, { retryUnavailable: true })));
-    panel.append(renderPlanningSettings({document,state:planningState,contexts:snapshot.contexts,onSave:async settings=>{await planningStore.setSettings(settings);await refreshLocal();}}));
+    const languageField=el('label','field','Language / 语言');const languageSelect=ui(document).select('Interface language',[['en','English',true],['zh-CN','简体中文',true]],planningState.settings.language||'en');
+    const languageNotice=el('p','hint');
+    languageSelect.addEventListener('change',async()=>{const value=languageSelect.value;languageSelect.disabled=true;try{await planningStore.setLanguage(value);await refreshLocal();}catch(cause){languageSelect.value=getLanguage(document);setText(languageNotice,cause.message||'Could not save language. Please try again.');}finally{languageSelect.disabled=false;}});
+    languageField.append(languageSelect);panel.prepend(languageField,languageNotice);
+    const signature=JSON.stringify([snapshot.profile.id,snapshot.contexts,{...planningState.settings,language:undefined}]);
+    if(!settingsEditor||settingsEditorKey!==signature){settingsEditorKey=signature;settingsEditor=renderPlanningSettings({document,state:planningState,contexts:snapshot.contexts,onSave:async settings=>{await planningStore.setSettings(settings);await refreshLocal();}});}
+    localizeTree(settingsEditor);panel.append(settingsEditor);
     if (notice) panel.append(el('p', 'notice', notice));
     return panel;
   }
@@ -315,8 +320,8 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
       const days = el('div', 'days');
       week.forEach(day => {
         const cell = el('div', `day${day.slice(0, 7) === month ? '' : ' outside'}${day === today ? ' today' : ''}`, String(Number(day.slice(-2))));
-        cell.setAttribute('aria-label', day);
-        const point=pressure.get(day);const badge=action(`View remaining tasks for ${day}`,String(point.tasks),()=>{selectedDay=day;selectedKey=null;render();},`pressure-badge ${pressureLevel(point.tasks,planningState.settings)}`);badge.dataset.pressureDay=day;badge.title=`${point.tasks} remaining · ${point.minutes} min`;cell.append(badge);
+        setLabel(cell,day);
+        const point=pressure.get(day);const badge=action(`View remaining tasks for ${day}`,String(point.tasks),()=>{selectedDay=day;selectedKey=null;render();},`pressure-badge ${pressureLevel(point.tasks,planningState.settings)}`);badge.dataset.pressureDay=day;badge.title=translate(document,`${point.tasks} remaining · ${point.minutes} min`);cell.append(badge);
         days.append(cell);
       });
       row.append(days);
@@ -325,7 +330,7 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
       shown.forEach((segment, barIndex) => {
         const item = byKey.get(segment.itemKey);
         const bar = action(`Open ${item.title} in ${item.contexts.join(', ')}`, '', () => { selectedKey = item.key; notice = null; render(); }, `bar ${item.type}${item.completed ? ' completed' : ''}`);
-        bar.append(el('span', 'context-tag', shortContext(item.contexts[0])), el('span', 'bar-title', `${item.completed ? '✓ ' : ''}${item.title}`));
+        bar.append(el('span', 'context-tag', shortContext(item.contexts[0]),true), el('span', 'bar-title', `${item.completed ? '✓ ' : ''}${item.title}`,true));
         bar.dataset.itemKey = item.key;
         bar.style.gridColumn = `${segment.startColumn + 1} / ${segment.endColumn + 2}`;
         bar.style.gridRow = String(barIndex + 1);
@@ -349,23 +354,26 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
 
   function render() {
     if (!open) return;
+    setLanguage(document,planningState.settings.language);
+    const entry=document.querySelector('[data-planning-entry]');if(entry)localizeTree(entry);
     const style = el('style', '', styles);
     const backdrop = el('div', 'backdrop');
     const shell = el('section', 'shell');
     shell.setAttribute('role', 'dialog');
     shell.setAttribute('aria-modal', 'true');
-    shell.setAttribute('aria-label', 'Planning calendar');
+    shell.lang=getLanguage(document);
+    setLabel(shell,'Planning calendar');
     const header = el('header', 'header');
     const identity = el('div', 'identity');
     identity.append(el('p', 'eyebrow', 'Illinois Canvas'), el('h1', '', 'Planning calendar'), el('p', 'subline', 'Canvas completion and your own planning marks'));
     header.append(identity);
     const controls = el('div', 'controls');
-    controls.append(action('Previous month', '‹', () => navigate(shiftMonth(month, -1))), el('span', 'month-name', new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date(`${month}-01T12:00:00`))), action('Next month', '›', () => navigate(shiftMonth(month, 1))), action('Today', 'Today', () => navigate(todayDay().slice(0, 7))), action('Refresh calendar', 'Refresh', () => load(true)), action('Close planning calendar', '×', close, 'close'));
+    controls.append(action('Previous month', '‹', () => navigate(shiftMonth(month, -1))), el('span', 'month-name', new Intl.DateTimeFormat(intlLocale(document), { month: 'long', year: 'numeric' }).format(new Date(`${month}-01T12:00:00`))), action('Next month', '›', () => navigate(shiftMonth(month, 1))), action('Today', 'Today', () => navigate(todayDay().slice(0, 7))), action('Refresh calendar', 'Refresh', () => load(true)), action('Close planning calendar', '×', close, 'close'));
     header.append(controls);
     shell.append(header);
     const tabs = el('nav', 'tabs');
     tabs.setAttribute('role', 'tablist');
-    tabs.setAttribute('aria-label', 'Planner views');
+    setLabel(tabs,'Planner views');
     for (const [tab, name, label] of [['calendar', 'Calendar', 'Planning calendar view'], ['workload','Workload','Workload view'], ['planner','Planner','Planner view'], ['settings', 'Settings', 'Calendar settings']]) {
       const button = action(label, name, () => changeTab(tab), 'tab');
       button.setAttribute('role', 'tab');
