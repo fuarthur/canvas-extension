@@ -56,6 +56,7 @@ function makeAssignment(record, names, state, timeZone, userId) {
   return {
     key, type: 'assignment', title: record.title || assignment?.name || 'Untitled assignment',
     contexts: itemContexts(record, names), contextCodes: contextCodes(record), startDay, endDay: dueDay,
+    unlockAt, dueAt, manualStartDay: validDay(manual) ? manual : null, fixedStartAt: null, fixedEndAt: null,
     startAt: manual && startDay === manual ? null : unlockAt,
     endAt: dueAt, url: record.html_url || assignment?.html_url || null,
     completed: canvasCompleted || Boolean(state.completed?.[key]), canvasCompleted,
