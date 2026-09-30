@@ -45,6 +45,49 @@ test('fetchPages rejects HTML login responses and authorization failures', async
   await assert.rejects(fetchPages(async () => new Response('{}', { status: 401 }), `${origin}/api/v1/items`), error => error.code === 'AUTH');
 });
 
+test('forbidden Canvas requests identify the denied endpoint', async () => {
+  await assert.rejects(
+    fetchPages(async () => new Response('{"errors":["forbidden"]}', { status: 403, headers: { 'content-type': 'application/json' } }), `${origin}/api/v1/calendar_events?type=assignment`),
+    error => error instanceof CanvasApiError && error.code === 'FORBIDDEN' && /calendar_events/.test(error.message) && /403/.test(error.message)
+  );
+});
+
+function calendarFetch(statusForContexts) {
+  return async input => {
+    const url = new URL(input);
+    if (url.pathname.endsWith('/profile')) return json(fixture.profile);
+    if (url.pathname === '/api/v1/courses') return json([{ id: 1, name: 'Course 1' }]);
+    if (url.pathname.endsWith('/groups')) return json([{ id: 44, name: 'Old lab group' }]);
+    if (url.pathname === '/api/v1/account_calendars') return json({ account_calendars: [], total_results: 0 });
+    if (url.pathname === '/api/v1/calendar_events') {
+      const codes = url.searchParams.getAll('context_codes[]');
+      const status = statusForContexts(codes);
+      if (status !== 200) return new Response('{"status":"unauthorized","errors":[{"message":"user not authorized to perform that action"}]}', { status });
+      if (url.searchParams.get('type') === 'event') return json(codes.includes('course_1') ? [fixture.event] : []);
+      return json(codes.includes('course_1') ? [{ ...fixture.assignment, assignment: fixture.assignmentDetail }] : []);
+    }
+    throw new Error(`Unexpected URL ${url}`);
+  };
+}
+
+test('denied context does not block accessible events or assignments and is reported', async () => {
+  const snapshot = await loadCanvasSnapshot({
+    month: '2026-09', fetchImpl: calendarFetch(codes => codes.includes('group_44') ? 403 : 200)
+  });
+  assert.deepEqual(snapshot.events.map(event => event.id), [5]);
+  assert.deepEqual(snapshot.assignments.map(event => event.id), ['assignment_987']);
+  assert.equal(snapshot.warnings.length, 1);
+  assert.match(snapshot.warnings[0], /Old lab group/);
+});
+
+test('global calendar denial is an error rather than a successful empty calendar', async () => {
+  await assert.rejects(loadCanvasSnapshot({ month: '2026-09', fetchImpl: calendarFetch(() => 403) }), error => error.code === 'FORBIDDEN');
+});
+
+test('calendar login failures are not treated as inaccessible contexts', async () => {
+  await assert.rejects(loadCanvasSnapshot({ month: '2026-09', fetchImpl: calendarFetch(() => 401) }), error => error.code === 'AUTH');
+});
+
 test('loadCanvasSnapshot batches 12 contexts including account calendars and retrieves effective assignment dates', async () => {
   const calendarUrls = [];
   const fetchImpl = async input => {

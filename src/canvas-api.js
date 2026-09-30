@@ -15,12 +15,17 @@ function safeUrl(value) {
 }
 
 async function getJson(fetchImpl, url) {
-  const response = await fetchImpl(safeUrl(url).href, {
+  const requestUrl = safeUrl(url);
+  const endpoint = `${requestUrl.pathname}${requestUrl.searchParams.has('type') ? ` (${requestUrl.searchParams.get('type')})` : ''}`;
+  const response = await fetchImpl(requestUrl.href, {
     credentials: 'include',
     headers: { Accept: 'application/json' }
   });
-  if (response.status === 401 || response.status === 403) {
-    throw new CanvasApiError('AUTH', 'Please sign in to Canvas and try again.');
+  if (response.status === 401) {
+    throw new CanvasApiError('AUTH', `Canvas rejected ${endpoint} (401). Please sign in and try again.`);
+  }
+  if (response.status === 403) {
+    throw new CanvasApiError('FORBIDDEN', `Canvas denied access to ${endpoint} (403).`);
   }
   if (!response.ok) throw new CanvasApiError('HTTP', `Canvas request failed (${response.status}).`);
   if (!response.headers.get('content-type')?.includes('application/json')) {
@@ -86,6 +91,27 @@ function assignmentIdentity(record) {
   return /^\d+$/.test(id) && courseId ? { id, courseId } : null;
 }
 
+// One inaccessible context makes Canvas reject the entire batch. Isolate it
+// without hiding failures from the other endpoints or treating 401 as partial data.
+async function fetchCalendarBatch(fetchImpl, type, codes, range) {
+  const url = new URL('/api/v1/calendar_events', ORIGIN);
+  url.searchParams.set('type', type);
+  url.searchParams.set('start_date', range.startDate);
+  url.searchParams.set('end_date', range.endDate);
+  url.searchParams.set('per_page', '100');
+  for (const code of codes) url.searchParams.append('context_codes[]', code);
+  try {
+    return { rows: await fetchPages(fetchImpl, url.href), denied: [], readable: true };
+  } catch (error) {
+    if (!(error instanceof CanvasApiError) || error.code !== 'FORBIDDEN') throw error;
+    if (codes.length === 1) return { rows: [], denied: codes, readable: false };
+    const middle = Math.ceil(codes.length / 2);
+    const left = await fetchCalendarBatch(fetchImpl, type, codes.slice(0, middle), range);
+    const right = await fetchCalendarBatch(fetchImpl, type, codes.slice(middle), range);
+    return { rows: [...left.rows, ...right.rows], denied: [...left.denied, ...right.denied], readable: left.readable || right.readable };
+  }
+}
+
 export async function loadCanvasSnapshot({ fetchImpl = fetch, month }) {
   const range = monthRange(month);
   const profile = (await getJson(fetchImpl, `${ORIGIN}/api/v1/users/self/profile`)).body;
@@ -110,20 +136,21 @@ export async function loadCanvasSnapshot({ fetchImpl = fetch, month }) {
   const requests = [];
   for (const type of ['event', 'assignment']) {
     for (const batch of chunks(uniqueContexts.map(context => context.code), 10)) {
-      const url = new URL('/api/v1/calendar_events', ORIGIN);
-      url.searchParams.set('type', type);
-      url.searchParams.set('start_date', range.startDate);
-      url.searchParams.set('end_date', range.endDate);
-      url.searchParams.set('per_page', '100');
-      for (const code of batch) url.searchParams.append('context_codes[]', code);
-      requests.push({ type, rows: fetchPages(fetchImpl, url.href) });
+      requests.push(fetchCalendarBatch(fetchImpl, type, batch, range).then(result => ({ type, ...result })));
     }
   }
   const events = [];
   const assignments = [];
-  for (const request of requests) {
-    const rows = await request.rows;
-    (request.type === 'event' ? events : assignments).push(...rows);
+  const results = await Promise.all(requests);
+  if (!results.some(result => result.readable)) {
+    throw new CanvasApiError('FORBIDDEN', 'Canvas denied access to all requested calendars (403).');
+  }
+  const denied = new Set(results.flatMap(result => result.denied));
+  const warnings = denied.size ? [
+    `Some calendar data could not be loaded because Canvas denied access: ${uniqueContexts.filter(context => denied.has(context.code)).map(context => context.name || context.code).join(', ')}.`
+  ] : [];
+  for (const result of results) {
+    (result.type === 'event' ? events : assignments).push(...result.rows);
   }
   const enrichedAssignments = await Promise.all(assignments.map(async record => {
     if (record.assignment && 'due_at' in record.assignment && 'unlock_at' in record.assignment) return record;
@@ -132,5 +159,5 @@ export async function loadCanvasSnapshot({ fetchImpl = fetch, month }) {
     const detail = (await getJson(fetchImpl, `${ORIGIN}/api/v1/courses/${identity.courseId}/assignments/${identity.id}`)).body;
     return { ...record, assignment: detail };
   }));
-  return { profile, contexts: uniqueContexts, events, assignments: enrichedAssignments, range };
+  return { profile, contexts: uniqueContexts, events, assignments: enrichedAssignments, range, warnings };
 }

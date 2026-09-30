@@ -36,6 +36,18 @@ test('manifest targets only the Illinois Canvas calendar', () => {
   assert.deepEqual(manifest.content_scripts[0].matches, ['https://canvas.illinois.edu/calendar*']);
 });
 
+test('partial calendar warning is visible alongside the loaded items', async () => {
+  const { host, planner } = setup(async () => ({
+    profile: fixture.profile, contexts: [{ code: 'course_1', name: 'Course 1' }],
+    events: [fixture.event], assignments: [],
+    warnings: ['Canvas denied access to these calendars: Old lab group.'],
+    range: { startDate: '2026-03-01', endDate: '2027-03-31' }
+  }));
+  await planner.toggle();
+  assert.match(host.shadowRoot.querySelector('[role="status"]').textContent, /Old lab group/);
+  assert.ok(host.shadowRoot.querySelector('[data-item-key="event:5"]'));
+});
+
 test('calendar hash month is used when valid and falls back to current month', () => {
   assert.equal(monthFromCalendarHash('#view_name=month&view_start=2026-09-01', new Date('2026-01-02T12:00:00Z')), '2026-09');
   assert.equal(monthFromCalendarHash('#view_start=wrong', new Date('2026-01-02T12:00:00Z')), '2026-01');

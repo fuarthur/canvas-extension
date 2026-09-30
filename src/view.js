@@ -247,6 +247,11 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
       body.append(status);
     } else if (snapshot) {
       const items = normalizeItems(snapshot, userState);
+      for (const warning of snapshot.warnings || []) {
+        const message = el('p', 'notice', warning);
+        message.setAttribute('role', 'status');
+        body.append(message);
+      }
       body.append(calendar(items));
       const selected = items.find(item => item.key === selectedKey);
       if (selected) shell.append(detail(selected));
