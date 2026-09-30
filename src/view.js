@@ -111,7 +111,12 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
   }
 
   async function close(force=false) {
-    if(force!==true&&planController&&!await planController.requestLeave())return;
+    if(force!==true&&planController){
+      // The retained draft may be suspended behind Settings. Its leave dialog
+      // must be visible before waiting for a save/discard decision.
+      if(planController.hasUnsavedChanges()&&activeTab!=='planner'){activeTab='planner';render();}
+      if(!await planController.requestLeave())return;
+    }
     planController?.destroy();planController=null;controllerUserId=null;
     unsubscribeStorage?.();unsubscribeStorage=null;localVersion++;
     open = false;

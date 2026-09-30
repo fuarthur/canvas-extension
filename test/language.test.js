@@ -124,3 +124,9 @@ test('before the account is identified the native entry is bilingual without cha
  const dom=new JSDOM('<div class="calendar_view_buttons" role="tablist"><button role="tab">Month</button></div>');const document=dom.window.document;const remove=mountCalendarEntry({document,onOpen:()=>{}});
  assert.equal(document.querySelector('[data-planning-entry]').textContent,'Planning / 规划');assert.equal(document.querySelector('[role="tab"]').textContent,'Month');remove();dom.window.close();
 });
+
+test('closing from Settings presents the suspended draft decision in the visible overlay',async()=>{
+ const s=await setup();await s.click('Planner view');await s.click('New plan');await s.change('Plan name','Keep my draft');await s.click('Calendar settings');await s.click('Close planning calendar');
+ assert.ok(s.root.querySelector('[role="alertdialog"]'),'the leave decision must be attached to the current overlay');await s.click('Return to editing');assert.equal(control(s.root,'Plan name').value,'Keep my draft');
+ await s.click('Calendar settings');await s.click('Close planning calendar');await s.click('Discard draft changes');assert.equal(s.root.host.isConnected,false);assert.deepEqual((await s.store.loadPlanningState()).plans,{});s.destroy();
+});
