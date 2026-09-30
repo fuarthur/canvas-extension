@@ -6,6 +6,7 @@ import {resolveEstimate} from './estimates.js';
 import {workloadSummary,workloadSeries,pressureLevel} from './workload.js';
 import {renderWorkloadView,renderDayList} from './workload-view.js';
 import {renderPlanningSettings} from './settings-view.js';
+import {createPlannerController} from './planner-view.js';
 
 function monthOf(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
@@ -69,7 +70,7 @@ function shortContext(name) {
   return courseCode ? courseCode[0] : String(name || 'Personal').slice(0, 18);
 }
 
-export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, now = () => new Date() }) {
+export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFactory, initialMonth, now = () => new Date() }) {
   const document = host.ownerDocument;
   const root = host.shadowRoot || host.attachShadow({ mode: 'open' });
   let open = false;
@@ -79,6 +80,8 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
   let userState = { starts: {}, completed: {} };
   let planningState = {settings:defaultSettings(),estimates:{},singleSessions:{},plans:{},warnings:[]};
   let selectedDay = null;
+  let planController = null;
+  let controllerUserId = null;
   let loading = false;
   let error = null;
   let selectedKey = null;
@@ -105,7 +108,9 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
     return button;
   }
 
-  function close() {
+  async function close(force=false) {
+    if(force!==true&&planController&&!await planController.requestLeave())return;
+    planController?.destroy();planController=null;controllerUserId=null;
     open = false;
     requestId++;
     loading = false;
@@ -130,6 +135,7 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
     try {
       const nextSnapshot = await loadSnapshot(month, options);
       if (!open || currentRequest !== requestId) return;
+      if(planController&&String(controllerUserId)!==String(nextSnapshot.profile.id)){planController.destroy();planController=null;controllerUserId=null;}
       snapshot = nextSnapshot;
       store = storeFactory(nextSnapshot.profile.id);
       userState = await store.load();
@@ -238,7 +244,8 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
     return panel;
   }
 
-  function changeTab(tab) {
+  async function changeTab(tab) {
+    if(activeTab==='planner'&&tab!=='planner'&&planController&&!await planController.requestLeave())return;
     activeTab = tab;
     selectedKey = null;
     notice = null;
@@ -360,7 +367,7 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
     const tabs = el('nav', 'tabs');
     tabs.setAttribute('role', 'tablist');
     tabs.setAttribute('aria-label', 'Planner views');
-    for (const [tab, name, label] of [['calendar', 'Calendar', 'Planning calendar view'], ['workload','Workload','Workload view'], ['settings', 'Settings', 'Calendar settings']]) {
+    for (const [tab, name, label] of [['calendar', 'Calendar', 'Planning calendar view'], ['workload','Workload','Workload view'], ['planner','Planner','Planner view'], ['settings', 'Settings', 'Calendar settings']]) {
       const button = action(label, name, () => changeTab(tab), 'tab');
       button.setAttribute('role', 'tab');
       button.setAttribute('aria-selected', String(activeTab === tab));
@@ -389,7 +396,12 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
       const pressure=workloadSummary(items,combinedState(),{now:typeof now==='function'?now():now,timeZone:snapshot.profile.time_zone,range:monthRange()});
       const todaySummary=el('p','today-summary',`Today · ${pressure.today.tasks} remaining · ${pressure.overdue.length} overdue`);body.append(todaySummary);
       if(activeTab==='workload')body.append(renderWorkloadView({document,items,state:combinedState(),range:monthRange(),now:typeof now==='function'?now():now,timeZone:snapshot.profile.time_zone,onOpenItem:key=>{selectedKey=key;render();},onComplete:completeItem}));
-      else body.append(calendar(items));
+      else if(activeTab==='planner'){
+        const data={items,state:planningState,completed:userState.completed,loadedRange:snapshot.range};
+        if(!planController){controllerUserId=snapshot.profile.id;planController=createPlannerController({document,...data,planClient:planClientFactory?.(snapshot.profile.id)||{save:async()=>({ok:false,message:'Plan storage is unavailable.'}),remove:async()=>({ok:false,message:'Plan storage is unavailable.'})},now,timeZone:snapshot.profile.time_zone||Intl.DateTimeFormat().resolvedOptions().timeZone,onOpenItem:key=>{selectedKey=key;render();},onComplete:completeItem,onReloadPlans:()=>store.loadPlanningState()});}
+        else planController.setData(data);
+        body.append(planController.render());
+      }else body.append(calendar(items));
       if (snapshot.selectedCalendars?.length === 0) body.append(el('p', 'hint', 'No calendars selected. Choose calendars in Settings.'));
       const selected = items.find(item => item.key === selectedKey);
       if (selected) shell.append(detail(selected));
@@ -416,9 +428,9 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
   }
 
   async function toggle() {
-    if (open) { close(); return; }
+    if (open) { await close(); return; }
     await show();
   }
 
-  return { show, toggle, destroy: close };
+  return { show, toggle, destroy: () => close(true) };
 }

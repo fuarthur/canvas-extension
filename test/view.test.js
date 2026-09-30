@@ -255,3 +255,10 @@ test('calendar pressure badges open the deadline list and completion updates loc
  host.shadowRoot.querySelector('[aria-label="Open Essay"]').click();await click('Mark complete');assert.equal(host.shadowRoot.querySelector('[data-pressure-day="2026-09-20"]').textContent,'0');
  await click('Workload view');assert.match(host.shadowRoot.textContent,/0 tasks/);assert.equal(calls,1);dom.window.close();
 });
+
+test('Planner tab protects an unsaved draft when closing the main overlay',async()=>{
+ const dom=new JSDOM('<main>Canvas</main>',{url:'https://canvas.illinois.edu/calendar'});const host=dom.window.document.createElement('div');
+ const {createPlannerStore}=await import('../src/storage.js');const {memoryStorage}=await import('./helpers/planning.js');const store=createPlannerStore(memoryStorage(),'canvas.illinois.edu',77);
+ const planner=mountPlanner({host,storeFactory:()=>store,planClientFactory:()=>({save:async()=>({ok:false,message:'No save'}),remove:async()=>({ok:true})}),initialMonth:'2026-10',now:()=>new Date('2026-10-01T12:00:00Z'),loadSnapshot:async()=>({profile:fixture.profile,contexts:[],events:[],assignments:[],range:{startDate:'2026-10-01',endDate:'2026-12-31'}})});
+ await planner.show();host.shadowRoot.querySelector('[aria-label="Planner view"]').click();await new Promise(r=>setTimeout(r,0));host.shadowRoot.querySelector('[aria-label="New plan"]').click();await new Promise(r=>setTimeout(r,0));host.shadowRoot.querySelector('[aria-label="Close planning calendar"]').click();await new Promise(r=>setTimeout(r,0));assert.equal(host.isConnected,true);assert.ok(host.shadowRoot.querySelector('[role="alertdialog"]'));host.shadowRoot.querySelector('[aria-label="Discard draft changes"]').click();await new Promise(r=>setTimeout(r,0));assert.equal(host.isConnected,false);dom.window.close();
+});
