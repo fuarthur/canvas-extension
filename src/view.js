@@ -70,7 +70,7 @@ function shortContext(name) {
   return courseCode ? courseCode[0] : String(name || 'Personal').slice(0, 18);
 }
 
-export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFactory, initialMonth, now = () => new Date() }) {
+export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFactory, schedulerClientFactory, initialMonth, now = () => new Date() }) {
   const document = host.ownerDocument;
   const root = host.shadowRoot || host.attachShadow({ mode: 'open' });
   let open = false;
@@ -393,12 +393,12 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
         body.append(message);
       }
       for(const warning of planningState.warnings)body.append(el('p','notice',warning));
-      const pressure=workloadSummary(items,combinedState(),{now:typeof now==='function'?now():now,timeZone:snapshot.profile.time_zone,range:monthRange()});
+      const pressure=workloadSummary(items,combinedState(),{now:typeof now==='function'?now():now,schedulerClient:schedulerClientFactory?.(snapshot.profile.id),timeZone:snapshot.profile.time_zone,range:monthRange()});
       const todaySummary=el('p','today-summary',`Today · ${pressure.today.tasks} remaining · ${pressure.overdue.length} overdue`);body.append(todaySummary);
-      if(activeTab==='workload')body.append(renderWorkloadView({document,items,state:combinedState(),range:monthRange(),now:typeof now==='function'?now():now,timeZone:snapshot.profile.time_zone,onOpenItem:key=>{selectedKey=key;render();},onComplete:completeItem}));
+      if(activeTab==='workload')body.append(renderWorkloadView({document,items,state:combinedState(),range:monthRange(),now:typeof now==='function'?now():now,schedulerClient:schedulerClientFactory?.(snapshot.profile.id),timeZone:snapshot.profile.time_zone,onOpenItem:key=>{selectedKey=key;render();},onComplete:completeItem}));
       else if(activeTab==='planner'){
         const data={items,state:planningState,completed:userState.completed,loadedRange:snapshot.range};
-        if(!planController){controllerUserId=snapshot.profile.id;planController=createPlannerController({document,...data,planClient:planClientFactory?.(snapshot.profile.id)||{save:async()=>({ok:false,message:'Plan storage is unavailable.'}),remove:async()=>({ok:false,message:'Plan storage is unavailable.'})},now,timeZone:snapshot.profile.time_zone||Intl.DateTimeFormat().resolvedOptions().timeZone,onOpenItem:key=>{selectedKey=key;render();},onComplete:completeItem,onReloadPlans:()=>store.loadPlanningState()});}
+        if(!planController){controllerUserId=snapshot.profile.id;planController=createPlannerController({document,...data,planClient:planClientFactory?.(snapshot.profile.id)||{save:async()=>({ok:false,message:'Plan storage is unavailable.'}),remove:async()=>({ok:false,message:'Plan storage is unavailable.'})},now,schedulerClient:schedulerClientFactory?.(snapshot.profile.id),timeZone:snapshot.profile.time_zone||Intl.DateTimeFormat().resolvedOptions().timeZone,onOpenItem:key=>{selectedKey=key;render();},onComplete:completeItem,onReloadPlans:()=>store.loadPlanningState()});}
         else planController.setData(data);
         body.append(planController.render());
       }else body.append(calendar(items));
