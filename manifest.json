@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Canvas Planning Calendar",
-  "version": "0.1.0",
-  "description": "A separate planning month view for Illinois Canvas calendar.",
+  "version": "0.2.0",
+  "description": "Workload charts, task estimates and balanced study plans for Illinois Canvas.",
   "permissions": ["storage"],
   "host_permissions": ["https://canvas.illinois.edu/*"],
   "action": { "default_title": "Toggle planning calendar" },
