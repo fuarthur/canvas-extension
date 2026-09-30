@@ -248,3 +248,10 @@ test('Today and day highlight use the Canvas profile time zone', async () => {
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(host.shadowRoot.querySelector('.day.today')?.getAttribute('aria-label'), '2026-10-01');
 });
+
+test('calendar pressure badges open the deadline list and completion updates locally without fetching',async()=>{
+ let calls=0;const {host,planner,click,dom}=setup(async()=>{calls++;return {profile:fixture.profile,contexts:[{code:'course_1',name:'Course 1'}],events:[],assignments:[{...fixture.assignment,assignment:fixture.assignmentDetail}],range:{startDate:'2026-03-01',endDate:'2027-03-31'}};});
+ await planner.toggle();const badge=host.shadowRoot.querySelector('[data-pressure-day="2026-09-20"]');assert.ok(badge);assert.equal(badge.textContent,'1');badge.click();assert.match(host.shadowRoot.querySelector('[aria-label="Tasks for 2026-09-20"]').textContent,/Essay/);
+ host.shadowRoot.querySelector('[aria-label="Open Essay"]').click();await click('Mark complete');assert.equal(host.shadowRoot.querySelector('[data-pressure-day="2026-09-20"]').textContent,'0');
+ await click('Workload view');assert.match(host.shadowRoot.textContent,/0 tasks/);assert.equal(calls,1);dom.window.close();
+});

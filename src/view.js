@@ -1,6 +1,11 @@
-import { dateKey, monthWeeks, validDay, weekSegments } from './dates.js';
+import { dateKey, monthWeeks, validDay, weekSegments, addDays } from './dates.js';
 import { normalizeItems } from './model.js';
 import { styles } from './styles.js';
+import {defaultSettings} from './planning-settings.js';
+import {resolveEstimate} from './estimates.js';
+import {workloadSummary,workloadSeries,pressureLevel} from './workload.js';
+import {renderWorkloadView,renderDayList} from './workload-view.js';
+import {renderPlanningSettings} from './settings-view.js';
 
 function monthOf(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
@@ -72,6 +77,8 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
   let snapshot = null;
   let store = null;
   let userState = { starts: {}, completed: {} };
+  let planningState = {settings:defaultSettings(),estimates:{},singleSessions:{},plans:{},warnings:[]};
+  let selectedDay = null;
   let loading = false;
   let error = null;
   let selectedKey = null;
@@ -126,6 +133,7 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
       snapshot = nextSnapshot;
       store = storeFactory(nextSnapshot.profile.id);
       userState = await store.load();
+      planningState = store.loadPlanningState ? await store.loadPlanningState() : {settings:defaultSettings(),estimates:{},singleSessions:{},plans:{},warnings:[]};
       if (!open || currentRequest !== requestId) return;
       draftSelection = new Set(snapshot.selectedCalendars || userState.selectedCalendars || snapshot.contexts.map(context => context.code));
       loading = false;
@@ -145,8 +153,13 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
     }
   }
 
+  const combinedState=()=>({...planningState,completed:userState.completed});
+  const monthRange=()=>({startDate:`${month}-01`,endDate:addDays(`${shiftMonth(month,1)}-01`,-1)});
+  async function refreshLocal(){userState=await store.load();if(store.loadPlanningState)planningState=await store.loadPlanningState();render();}
+  async function completeItem(key,value){await store.setCompleted(key,value);await refreshLocal();}
   async function navigate(nextMonth) {
     month = nextMonth;
+    selectedDay = null;
     selectedKey = null;
     expandedWeeks.clear();
     await load();
@@ -192,6 +205,14 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
       }, 'text-button'));
       if (item.needsStart) panel.append(el('p', 'hint', 'No Canvas open date; choose when you plan to start.'));
     }
+    const estimate=resolveEstimate(item,planningState);
+    const estimateField=el('label','field','Estimated effort (minutes)');
+    const estimateInput=el('input');estimateInput.type='number';estimateInput.min='1';estimateInput.max='1440';estimateInput.value=String(estimate.minutes);estimateInput.setAttribute('aria-label','Estimated effort minutes');
+    estimateInput.addEventListener('change',async()=>{try{await store.setEstimate(item.key,Number(estimateInput.value));await refreshLocal();}catch(cause){notice=cause.message;render();}});
+    estimateField.append(estimateInput);panel.append(estimateField,el('p','hint',estimate.label),action('Use automatic estimate','Use rule / default',async()=>{await store.setEstimate(item.key,null);await refreshLocal();},'text-button'));
+    if(item.type==='assignment'){
+      const once=el('label','check');const box=el('input');box.type='checkbox';box.checked=Boolean(planningState.singleSessions[item.key]);box.setAttribute('aria-label','Must finish in one session');box.addEventListener('change',async()=>{await store.setSingleSession(item.key,box.checked);await refreshLocal();});once.append(box,document.createTextNode('Must finish in one session'));panel.append(once);
+    }
     const check = el('label', 'check');
     const checkbox = el('input');
     checkbox.type = 'checkbox';
@@ -199,9 +220,7 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
     checkbox.disabled = Boolean(item.canvasCompleted);
     checkbox.setAttribute('aria-label', 'Mark complete');
     checkbox.addEventListener('change', async () => {
-      await store.setCompleted(item.key, checkbox.checked);
-      userState = await store.load();
-      render();
+      await completeItem(item.key, checkbox.checked);
     });
     check.append(checkbox, document.createTextNode(item.canvasCompleted ? 'Completed in Canvas' : 'Complete in this extension'));
     panel.append(check);
@@ -269,6 +288,7 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
     });
     save.disabled = saving;
     panel.append(save, action('Retry unavailable calendars', 'Retry calendar access', () => load(true, { retryUnavailable: true })));
+    panel.append(renderPlanningSettings({document,state:planningState,contexts:snapshot.contexts,onSave:async settings=>{await store.setSettings(settings);await refreshLocal();}}));
     if (notice) panel.append(el('p', 'notice', notice));
     return panel;
   }
@@ -283,12 +303,14 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
     const segments = weekSegments(items, weeks);
     const byKey = new Map(items.map(item => [item.key, item]));
     const today = todayDay();
+    const pressure=new Map(workloadSeries(items,combinedState(),{startDate:weeks[0][0],endDate:weeks.at(-1)[6]}).map(p=>[p.day,p]));
     weeks.forEach((week, index) => {
       const row = el('div', 'week');
       const days = el('div', 'days');
       week.forEach(day => {
         const cell = el('div', `day${day.slice(0, 7) === month ? '' : ' outside'}${day === today ? ' today' : ''}`, String(Number(day.slice(-2))));
         cell.setAttribute('aria-label', day);
+        const point=pressure.get(day);const badge=action(`View remaining tasks for ${day}`,String(point.tasks),()=>{selectedDay=day;selectedKey=null;render();},`pressure-badge ${pressureLevel(point.tasks,planningState.settings)}`);badge.dataset.pressureDay=day;badge.title=`${point.tasks} remaining · ${point.minutes} min`;cell.append(badge);
         days.append(cell);
       });
       row.append(days);
@@ -315,6 +337,7 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
       monthGrid.append(row);
     });
     container.append(monthGrid);
+    if(selectedDay){const point=pressure.get(selectedDay);container.append(renderDayList({document,day:selectedDay,items:items.filter(i=>point?.itemKeys.includes(i.key)),state:combinedState(),onOpenItem:key=>{selectedKey=key;render();},onComplete:completeItem}));}
     return container;
   }
 
@@ -337,7 +360,7 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
     const tabs = el('nav', 'tabs');
     tabs.setAttribute('role', 'tablist');
     tabs.setAttribute('aria-label', 'Planner views');
-    for (const [tab, name, label] of [['calendar', 'Calendar', 'Planning calendar view'], ['settings', 'Settings', 'Calendar settings']]) {
+    for (const [tab, name, label] of [['calendar', 'Calendar', 'Planning calendar view'], ['workload','Workload','Workload view'], ['settings', 'Settings', 'Calendar settings']]) {
       const button = action(label, name, () => changeTab(tab), 'tab');
       button.setAttribute('role', 'tab');
       button.setAttribute('aria-selected', String(activeTab === tab));
@@ -362,14 +385,20 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
         message.setAttribute('role', 'status');
         body.append(message);
       }
-      body.append(calendar(items));
+      for(const warning of planningState.warnings)body.append(el('p','notice',warning));
+      const pressure=workloadSummary(items,combinedState(),{now:typeof now==='function'?now():now,timeZone:snapshot.profile.time_zone,range:monthRange()});
+      const todaySummary=el('p','today-summary',`Today · ${pressure.today.tasks} remaining · ${pressure.overdue.length} overdue`);body.append(todaySummary);
+      if(activeTab==='workload')body.append(renderWorkloadView({document,items,state:combinedState(),range:monthRange(),now:typeof now==='function'?now():now,timeZone:snapshot.profile.time_zone,onOpenItem:key=>{selectedKey=key;render();},onComplete:completeItem}));
+      else body.append(calendar(items));
       if (snapshot.selectedCalendars?.length === 0) body.append(el('p', 'hint', 'No calendars selected. Choose calendars in Settings.'));
       const selected = items.find(item => item.key === selectedKey);
       if (selected) shell.append(detail(selected));
     }
     shell.append(body);
     backdrop.append(shell);
+    const focused=root.activeElement;const focusId=focused?.dataset?.controlId||focused?.getAttribute('aria-label');const selection=focused?.selectionStart;
     root.replaceChildren(style, backdrop);
+    if(focusId){const target=[...root.querySelectorAll('[data-control-id],[aria-label]')].find(n=>(n.dataset.controlId||n.getAttribute('aria-label'))===focusId);target?.focus();if(selection!=null&&target?.type==='text')target.setSelectionRange(selection,selection);}
   }
 
   async function show(nextMonth) {
