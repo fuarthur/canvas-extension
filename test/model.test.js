@@ -84,3 +84,10 @@ test('event with malformed start retains its valid end date with a warning', () 
   assert.equal(item.endDay, '2026-09-20');
   assert.ok(item.warnings.length > 0);
 });
+
+test('display fallback is not a real unlock and manual dates cannot overwrite Canvas facts',()=>{
+ const [missing]=normalizeItems(snapshot({events:[],assignments:[{...fixture.assignment,assignment:{...fixture.assignmentDetail,unlock_at:null}}]}));
+ assert.equal(missing.unlockAt,null);assert.equal(missing.startDay,'2026-09-20');assert.deepEqual(missing.contextCodes,['course_1']);
+ const [manual]=normalizeItems(snapshot({events:[]}),{starts:{'assignment:987':'2026-09-01'}});
+ assert.equal(manual.unlockAt,fixture.assignmentDetail.unlock_at);assert.equal(manual.manualStartDay,'2026-09-01');assert.equal(manual.dueAt,fixture.assignmentDetail.due_at);
+});

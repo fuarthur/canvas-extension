@@ -66,3 +66,12 @@ export function weekSegments(items, weeks) {
     });
   });
 }
+
+export function addDays(day,offset){
+ if(!validDay(day)||!Number.isInteger(offset))throw new Error('Invalid day or offset');
+ const value=new Date(`${day}T12:00:00Z`);value.setUTCDate(value.getUTCDate()+offset);return value.toISOString().slice(0,10);
+}
+export function daysBetween(startDate,endDate){
+ if(!validDay(startDate)||!validDay(endDate)||endDate<startDate)throw new Error('Invalid date range');
+ const result=[];for(let day=startDate;day<=endDate;day=addDays(day,1))result.push(day);return result;
+}

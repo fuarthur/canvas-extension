@@ -25,9 +25,9 @@ function makeEvent(record, names, state, timeZone) {
   if (rawEndDay && rawEndDay < startDay) warnings.push('Canvas event ends before it starts.');
   return {
     key, type: 'event', title: record.title || 'Untitled event',
-    contexts: itemContexts(record, names), startDay,
+    contexts: itemContexts(record, names), contextCodes: contextCodes(record), startDay,
     endDay: rawEndDay && rawEndDay >= startDay ? rawEndDay : startDay,
-    startAt, endAt, url: record.html_url || null,
+    startAt, endAt, fixedStartAt: startAt, fixedEndAt: endAt, unlockAt: null, dueAt: null, manualStartDay: null, url: record.html_url || null,
     completed: Boolean(state.completed?.[key]), needsStart: false, warnings
   };
 }
@@ -55,7 +55,7 @@ function makeAssignment(record, names, state, timeZone, userId) {
   }
   return {
     key, type: 'assignment', title: record.title || assignment?.name || 'Untitled assignment',
-    contexts: itemContexts(record, names), startDay, endDay: dueDay,
+    contexts: itemContexts(record, names), contextCodes: contextCodes(record), startDay, endDay: dueDay,
     startAt: manual && startDay === manual ? null : unlockAt,
     endAt: dueAt, url: record.html_url || assignment?.html_url || null,
     completed: canvasCompleted || Boolean(state.completed?.[key]), canvasCompleted,
@@ -76,6 +76,7 @@ export function normalizeItems(snapshot, userState = { starts: {}, completed: {}
     for (const context of item.contexts) {
       if (!existing.contexts.includes(context)) existing.contexts.push(context);
     }
+    for (const code of item.contextCodes) if (!existing.contextCodes.includes(code)) existing.contextCodes.push(code);
     existing.completed ||= item.completed;
     existing.canvasCompleted ||= item.canvasCompleted;
   };
