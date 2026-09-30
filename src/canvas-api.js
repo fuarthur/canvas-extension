@@ -1,4 +1,21 @@
 const ORIGIN = 'https://canvas.illinois.edu';
+const CACHE_MS = 5 * 60 * 1000;
+
+export function createCanvasLoader({ fetchImpl = fetch, readSelection, now = Date.now } = {}) {
+  const cache = new Map();
+  let active = 0;
+  const waiting = [];
+  const limitedFetch = async (...args) => {
+    if (active >= 6) await new Promise(resolve => waiting.push(resolve));
+    else active++;
+    try { return await fetchImpl(...args); }
+    finally {
+      if (waiting.length) waiting.shift()();
+      else active--;
+    }
+  };
+  return (month, options = {}) => loadCanvasSnapshot({ fetchImpl: limitedFetch, readSelection, now, cache, month, ...options });
+}
 
 export class CanvasApiError extends Error {
   constructor(code, message) {
@@ -99,6 +116,7 @@ async function fetchCalendarBatch(fetchImpl, type, codes, range) {
   url.searchParams.set('start_date', range.startDate);
   url.searchParams.set('end_date', range.endDate);
   url.searchParams.set('per_page', '100');
+  if (type === 'assignment') url.searchParams.append('include[]', 'submission');
   for (const code of codes) url.searchParams.append('context_codes[]', code);
   try {
     return { rows: await fetchPages(fetchImpl, url.href), denied: [], readable: true };
@@ -106,22 +124,33 @@ async function fetchCalendarBatch(fetchImpl, type, codes, range) {
     if (!(error instanceof CanvasApiError) || error.code !== 'FORBIDDEN') throw error;
     if (codes.length === 1) return { rows: [], denied: codes, readable: false };
     const middle = Math.ceil(codes.length / 2);
-    const left = await fetchCalendarBatch(fetchImpl, type, codes.slice(0, middle), range);
-    const right = await fetchCalendarBatch(fetchImpl, type, codes.slice(middle), range);
+    const [left, right] = await Promise.all([
+      fetchCalendarBatch(fetchImpl, type, codes.slice(0, middle), range),
+      fetchCalendarBatch(fetchImpl, type, codes.slice(middle), range)
+    ]);
     return { rows: [...left.rows, ...right.rows], denied: [...left.denied, ...right.denied], readable: left.readable || right.readable };
   }
 }
 
-export async function loadCanvasSnapshot({ fetchImpl = fetch, month }) {
+export async function loadCanvasSnapshot({ fetchImpl = fetch, month, readSelection, cache = new Map(), now = Date.now, retryUnavailable = false }) {
   const range = monthRange(month);
   const profile = (await getJson(fetchImpl, `${ORIGIN}/api/v1/users/self/profile`)).body;
   if (!profile || !Number.isFinite(Number(profile.id))) {
     throw new CanvasApiError('DATA', 'Canvas did not identify the signed-in user.');
   }
-  const [courses, groups, accountCalendars] = await Promise.all([
+  const userId = String(profile.id);
+  let cached = cache.get(userId);
+  if (!cached || cached.expires <= now() || retryUnavailable) {
+    cached = { expires: now() + CACHE_MS, denied: { event: new Set(), assignment: new Set() }, directory: Promise.all([
     fetchPages(fetchImpl, `${ORIGIN}/api/v1/courses?enrollment_state=active&per_page=100`),
     fetchPages(fetchImpl, `${ORIGIN}/api/v1/users/self/groups?per_page=100`),
     fetchPages(fetchImpl, `${ORIGIN}/api/v1/account_calendars?per_page=100`, 'account_calendars')
+    ]) };
+    cache.set(userId, cached);
+    cached.directory.catch(() => { if (cache.get(userId) === cached) cache.delete(userId); });
+  }
+  const [[courses, groups, accountCalendars], savedSelection] = await Promise.all([
+    cached.directory, readSelection?.(profile.id)
   ]);
   const contexts = [
     { code: `user_${profile.id}`, name: 'Personal' },
@@ -133,19 +162,24 @@ export async function loadCanvasSnapshot({ fetchImpl = fetch, month }) {
     }))
   ];
   const uniqueContexts = [...new Map(contexts.map(context => [context.code, context])).values()];
+  const selectedCalendars = uniqueContexts.map(context => context.code).filter(code => !Array.isArray(savedSelection) || savedSelection.includes(code));
   const requests = [];
   for (const type of ['event', 'assignment']) {
-    for (const batch of chunks(uniqueContexts.map(context => context.code), 10)) {
+    const readableCodes = selectedCalendars.filter(code => !cached.denied[type].has(code));
+    for (const batch of chunks(readableCodes, 10)) {
       requests.push(fetchCalendarBatch(fetchImpl, type, batch, range).then(result => ({ type, ...result })));
     }
   }
   const events = [];
   const assignments = [];
   const results = await Promise.all(requests);
-  if (!results.some(result => result.readable)) {
-    throw new CanvasApiError('FORBIDDEN', 'Canvas denied access to all requested calendars (403).');
+  for (const result of results) for (const code of result.denied) cached.denied[result.type].add(code);
+  const denied = new Set(selectedCalendars.filter(code => cached.denied.event.has(code) || cached.denied.assignment.has(code)));
+  if (selectedCalendars.length && !results.some(result => result.readable)) {
+    const error = new CanvasApiError('FORBIDDEN', 'Canvas denied access to all selected calendars. Choose other calendars in Settings or retry access.');
+    error.snapshot = { profile, contexts: uniqueContexts, selectedCalendars, unavailableCalendars: [...denied], events: [], assignments: [], range, warnings: [] };
+    throw error;
   }
-  const denied = new Set(results.flatMap(result => result.denied));
   const warnings = denied.size ? [
     `Some calendar data could not be loaded because Canvas denied access: ${uniqueContexts.filter(context => denied.has(context.code)).map(context => context.name || context.code).join(', ')}.`
   ] : [];
@@ -157,7 +191,7 @@ export async function loadCanvasSnapshot({ fetchImpl = fetch, month }) {
     const identity = assignmentIdentity(record);
     if (!identity) return record;
     const detail = (await getJson(fetchImpl, `${ORIGIN}/api/v1/courses/${identity.courseId}/assignments/${identity.id}`)).body;
-    return { ...record, assignment: detail };
+    return { ...record, assignment: { ...record.assignment, ...detail } };
   }));
-  return { profile, contexts: uniqueContexts, events, assignments: enrichedAssignments, range, warnings };
+  return { profile, contexts: uniqueContexts, selectedCalendars, unavailableCalendars: [...denied], events, assignments: enrichedAssignments, range, warnings };
 }

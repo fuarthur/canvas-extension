@@ -57,3 +57,13 @@ test('overlapping edits from different tabs preserve independent choices', async
     completed: { 'assignment:987': true }
   });
 });
+
+test('calendar selection survives reopening, supports selecting none, and is account isolated', async () => {
+  const storage = memoryStorage();
+  const store = createPlannerStore(storage, 'canvas.illinois.edu', 77);
+  await store.setSelectedCalendars(['course_1']);
+  assert.deepEqual((await createPlannerStore(storage, 'canvas.illinois.edu', 77).load()).selectedCalendars, ['course_1']);
+  assert.equal((await createPlannerStore(storage, 'canvas.illinois.edu', 88).load()).selectedCalendars, undefined);
+  await store.setSelectedCalendars([]);
+  assert.deepEqual((await store.load()).selectedCalendars, []);
+});

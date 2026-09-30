@@ -32,7 +32,7 @@ function makeEvent(record, names, state, timeZone) {
   };
 }
 
-function makeAssignment(record, names, state, timeZone) {
+function makeAssignment(record, names, state, timeZone, userId) {
   const assignment = record.assignment;
   const dueAt = assignment ? assignment.due_at : record.end_at;
   const dueDay = dateKey(dueAt, timeZone);
@@ -43,6 +43,11 @@ function makeAssignment(record, names, state, timeZone) {
   const unlockDay = dateKey(unlockAt, timeZone);
   const manual = state.starts?.[key];
   const warnings = [];
+  const submission = assignment?.submission;
+  const canvasCompleted = typeof assignment?.user_submitted === 'boolean' ? assignment.user_submitted : Boolean(
+    submission && String(submission.user_id) === String(userId) && !submission.redo_request && !submission.missing &&
+    ['submitted', 'graded'].includes(submission.workflow_state)
+  );
   let startDay = unlockDay && unlockDay <= dueDay ? unlockDay : dueDay;
   if (manual != null) {
     if (validDay(manual) && manual <= dueDay) startDay = manual;
@@ -53,7 +58,8 @@ function makeAssignment(record, names, state, timeZone) {
     contexts: itemContexts(record, names), startDay, endDay: dueDay,
     startAt: manual && startDay === manual ? null : unlockAt,
     endAt: dueAt, url: record.html_url || assignment?.html_url || null,
-    completed: Boolean(state.completed?.[key]), needsStart: !unlockDay && !(manual && startDay === manual), warnings
+    completed: canvasCompleted || Boolean(state.completed?.[key]), canvasCompleted,
+    needsStart: !unlockDay && !(manual && startDay === manual), warnings
   };
 }
 
@@ -70,8 +76,10 @@ export function normalizeItems(snapshot, userState = { starts: {}, completed: {}
     for (const context of item.contexts) {
       if (!existing.contexts.includes(context)) existing.contexts.push(context);
     }
+    existing.completed ||= item.completed;
+    existing.canvasCompleted ||= item.canvasCompleted;
   };
   for (const record of snapshot.events) add(makeEvent(record, names, userState, snapshot.profile.time_zone));
-  for (const record of snapshot.assignments) add(makeAssignment(record, names, userState, snapshot.profile.time_zone));
+  for (const record of snapshot.assignments) add(makeAssignment(record, names, userState, snapshot.profile.time_zone, snapshot.profile.id));
   return [...merged.values()];
 }

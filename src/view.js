@@ -6,6 +6,13 @@ function monthOf(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
+export function nativeCalendarSelection(document) {
+  const rows = [...document.querySelectorAll('.context_list_context[data-context]')];
+  if (!rows.length) return undefined;
+  return rows.filter(row => row.querySelector('[role="checkbox"][aria-checked="true"]'))
+    .map(row => row.dataset.context).filter(code => /^(user|course|group|account)_\d+$/.test(code));
+}
+
 export function monthFromCalendarHash(hash, now = new Date()) {
   const value = new URLSearchParams(String(hash).replace(/^#/, '')).get('view_start');
   return /^\d{4}-(0[1-9]|1[0-2])(-\d{2})?$/.test(value ?? '') ? value.slice(0, 7) : monthOf(now);
@@ -48,6 +55,9 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
   let selectedKey = null;
   let notice = null;
   let requestId = 0;
+  let activeTab = 'calendar';
+  let draftSelection = new Set();
+  let saving = false;
   const expandedWeeks = new Set();
   const todayDay = () => dateKey(typeof now === 'function' ? now() : now, snapshot?.profile?.time_zone);
 
@@ -79,7 +89,7 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
     if (event.key === 'Escape') close();
   }
 
-  async function load(force = false) {
+  async function load(force = false, options = {}) {
     if (!force && snapshot && monthInRange(month, snapshot.range)) {
       render();
       return;
@@ -89,18 +99,26 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
     error = null;
     render();
     try {
-      const nextSnapshot = await loadSnapshot(month);
+      const nextSnapshot = await loadSnapshot(month, options);
       if (!open || currentRequest !== requestId) return;
       snapshot = nextSnapshot;
       store = storeFactory(nextSnapshot.profile.id);
       userState = await store.load();
       if (!open || currentRequest !== requestId) return;
+      draftSelection = new Set(snapshot.selectedCalendars || userState.selectedCalendars || snapshot.contexts.map(context => context.code));
       loading = false;
       render();
     } catch (cause) {
       if (!open || currentRequest !== requestId) return;
       loading = false;
       error = cause instanceof Error ? cause.message : 'Could not load Canvas calendar.';
+      snapshot = cause?.snapshot || null;
+      if (snapshot) {
+        store = storeFactory(snapshot.profile.id);
+        userState = await store.load();
+        if (!open || currentRequest !== requestId) return;
+        draftSelection = new Set(snapshot.selectedCalendars);
+      }
       render();
     }
   }
@@ -156,13 +174,14 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
     const checkbox = el('input');
     checkbox.type = 'checkbox';
     checkbox.checked = item.completed;
+    checkbox.disabled = Boolean(item.canvasCompleted);
     checkbox.setAttribute('aria-label', 'Mark complete');
     checkbox.addEventListener('change', async () => {
       await store.setCompleted(item.key, checkbox.checked);
       userState = await store.load();
       render();
     });
-    check.append(checkbox, document.createTextNode('Complete in this extension'));
+    check.append(checkbox, document.createTextNode(item.canvasCompleted ? 'Completed in Canvas' : 'Complete in this extension'));
     panel.append(check);
     if (notice) panel.append(el('p', 'notice', notice));
     for (const warning of item.warnings) panel.append(el('p', 'notice', warning));
@@ -175,6 +194,60 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
       link.setAttribute('aria-label', 'Open in Canvas');
       panel.append(link);
     }
+    return panel;
+  }
+
+  function changeTab(tab) {
+    activeTab = tab;
+    selectedKey = null;
+    notice = null;
+    if (tab === 'settings') draftSelection = new Set(snapshot.selectedCalendars || userState.selectedCalendars || snapshot.contexts.map(context => context.code));
+    render();
+  }
+
+  function settings() {
+    const panel = el('section', 'settings');
+    panel.append(el('h2', '', 'Choose calendars'), el('p', 'hint', 'Only selected calendars will be loaded. Your selection is saved for this Canvas account.'));
+    const tools = el('div', 'settings-actions');
+    tools.append(action('Select all calendars', 'Select all', () => { draftSelection = new Set(snapshot.contexts.map(context => context.code)); render(); }),
+      action('Deselect all calendars', 'Select none', () => { draftSelection.clear(); render(); }),
+      action('Deselect unavailable calendars', 'Remove unavailable', () => { for (const code of snapshot.unavailableCalendars || []) draftSelection.delete(code); render(); }));
+    panel.append(tools);
+    for (const context of snapshot.contexts) {
+      const row = el('label', 'calendar-choice');
+      const input = el('input');
+      input.type = 'checkbox';
+      input.checked = draftSelection.has(context.code);
+      input.dataset.contextCode = context.code;
+      input.setAttribute('aria-label', `Load ${context.name || context.code}`);
+      input.addEventListener('change', () => {
+        if (input.checked) draftSelection.add(context.code); else draftSelection.delete(context.code);
+      });
+      const label = el('div');
+      label.append(el('span', '', context.name || context.code));
+      const kind = context.code.split('_')[0];
+      label.append(el('p', 'hint', `${{ user: 'Personal', course: 'Course', group: 'Group', account: 'Account' }[kind] || 'Calendar'}${snapshot.unavailableCalendars?.includes(context.code) ? ' · Canvas denied access' : ''}`));
+      row.append(input, label);
+      panel.append(row);
+    }
+    const save = action('Save calendar selection', saving ? 'Saving…' : 'Save and load', async () => {
+      if (saving) return;
+      saving = true;
+      const userId = snapshot.profile.id;
+      try {
+        await store.setSelectedCalendars([...draftSelection]);
+        if (!open || snapshot?.profile.id !== userId) return;
+        activeTab = 'calendar';
+        selectedKey = null;
+        expandedWeeks.clear();
+        await load(true);
+      } catch {
+        notice = 'Could not save your calendar selection. Please try again.';
+      } finally { saving = false; render(); }
+    });
+    save.disabled = saving;
+    panel.append(save, action('Retry unavailable calendars', 'Retry calendar access', () => load(true, { retryUnavailable: true })));
+    if (notice) panel.append(el('p', 'notice', notice));
     return panel;
   }
 
@@ -233,17 +306,32 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
     shell.setAttribute('aria-label', 'Planning calendar');
     const header = el('header', 'header');
     const identity = el('div', 'identity');
-    identity.append(el('p', 'eyebrow', 'Illinois Canvas'), el('h1', '', 'Planning calendar'), el('p', 'subline', 'Your dates and completion marks stay in this extension'));
+    identity.append(el('p', 'eyebrow', 'Illinois Canvas'), el('h1', '', 'Planning calendar'), el('p', 'subline', 'Canvas completion and your own planning marks'));
     header.append(identity);
     const controls = el('div', 'controls');
     controls.append(action('Previous month', '‹', () => navigate(shiftMonth(month, -1))), el('span', 'month-name', new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date(`${month}-01T12:00:00`))), action('Next month', '›', () => navigate(shiftMonth(month, 1))), action('Today', 'Today', () => navigate(todayDay().slice(0, 7))), action('Refresh calendar', 'Refresh', () => load(true)), action('Close planning calendar', '×', close, 'close'));
     header.append(controls);
     shell.append(header);
+    const tabs = el('nav', 'tabs');
+    tabs.setAttribute('role', 'tablist');
+    tabs.setAttribute('aria-label', 'Planner views');
+    for (const [tab, name, label] of [['calendar', 'Calendar', 'Planning calendar view'], ['settings', 'Settings', 'Calendar settings']]) {
+      const button = action(label, name, () => changeTab(tab), 'tab');
+      button.setAttribute('role', 'tab');
+      button.setAttribute('aria-selected', String(activeTab === tab));
+      button.setAttribute('aria-controls', 'planner-panel');
+      button.disabled = loading || saving || !snapshot;
+      tabs.append(button);
+    }
+    shell.append(tabs);
     const body = el('div', 'content');
+    body.id = 'planner-panel';
+    body.setAttribute('role', 'tabpanel');
     if (loading) body.append(el('div', 'status', 'Loading Canvas calendar…'));
+    else if (activeTab === 'settings' && snapshot) body.append(settings());
     else if (error) {
       const status = el('div', 'status error');
-      status.append(el('p', '', error), action('Retry loading', 'Retry', () => load(true)));
+      status.append(el('p', '', error), action('Retry loading', 'Retry', () => load(true, { retryUnavailable: true })));
       body.append(status);
     } else if (snapshot) {
       const items = normalizeItems(snapshot, userState);
@@ -253,6 +341,7 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
         body.append(message);
       }
       body.append(calendar(items));
+      if (snapshot.selectedCalendars?.length === 0) body.append(el('p', 'hint', 'No calendars selected. Choose calendars in Settings.'));
       const selected = items.find(item => item.key === selectedKey);
       if (selected) shell.append(detail(selected));
     }

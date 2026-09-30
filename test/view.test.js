@@ -3,9 +3,22 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { JSDOM } from 'jsdom';
 import { mountPlanner, monthFromCalendarHash } from '../src/view.js';
+import * as viewApi from '../src/view.js';
 
 const fixture = JSON.parse(await readFile(new URL('./fixtures/canvas-pages.json', import.meta.url)));
 const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url)));
+
+test('initial selection reads only checked native Canvas calendars, with an API fallback when absent', () => {
+  const dom = new JSDOM(`<ul>
+    <li class="context_list_context" data-context="course_1"><span role="checkbox" aria-checked="true"></span></li>
+    <li class="context_list_context" data-context="group_44"><span role="checkbox" aria-checked="false"></span></li>
+    <li class="context_list_context" data-context="user_77"><span role="checkbox" aria-checked="true"></span></li>
+  </ul>`);
+  assert.deepEqual(viewApi.nativeCalendarSelection(dom.window.document), ['course_1', 'user_77']);
+  dom.window.document.querySelectorAll('[role="checkbox"]').forEach(box => box.setAttribute('aria-checked', 'false'));
+  assert.deepEqual(viewApi.nativeCalendarSelection(dom.window.document), []);
+  assert.equal(viewApi.nativeCalendarSelection(new JSDOM('').window.document), undefined);
+});
 
 function setup(loadSnapshot = async () => ({
   profile: fixture.profile,
@@ -21,6 +34,7 @@ function setup(loadSnapshot = async () => ({
     async load() { return structuredClone(saved); },
     async setStart(key, day) { if (day == null) delete saved.starts[key]; else saved.starts[key] = day; },
     async setCompleted(key, value) { if (value) saved.completed[key] = true; else delete saved.completed[key]; },
+    async setSelectedCalendars(codes) { saved.selectedCalendars = codes; },
     async setLastMonth(month) { saved.lastMonth = month; }
   };
   const planner = mountPlanner({ host, loadSnapshot, storeFactory: () => store, initialMonth: '2026-09', now: new Date('2026-09-15T12:00:00Z') });
@@ -46,6 +60,67 @@ test('partial calendar warning is visible alongside the loaded items', async () 
   await planner.toggle();
   assert.match(host.shadowRoot.querySelector('[role="status"]').textContent, /Old lab group/);
   assert.ok(host.shadowRoot.querySelector('[data-item-key="event:5"]'));
+});
+
+test('configuration saves selection and reloads, and reopening keeps the selection', async () => {
+  let savedRef;
+  let calls = 0;
+  const { host, planner, saved, click } = setup(async () => {
+    calls++;
+    return {
+      profile: fixture.profile,
+      contexts: [{ code: 'course_1', name: 'Course 1' }, { code: 'group_44', name: 'Lab group' }],
+      selectedCalendars: savedRef?.selectedCalendars || ['course_1', 'group_44'],
+      events: [fixture.event], assignments: [],
+      range: { startDate: '2026-03-01', endDate: '2027-03-31' }
+    };
+  });
+  savedRef = saved;
+  await planner.toggle();
+  await click('Calendar settings');
+  const group = host.shadowRoot.querySelector('[data-context-code="group_44"]');
+  assert.equal(group.checked, true);
+  group.click();
+  await click('Save calendar selection');
+  assert.deepEqual(saved.selectedCalendars, ['course_1']);
+  assert.equal(calls, 2);
+  assert.equal(host.shadowRoot.querySelector('[role="tab"][aria-selected="true"]').textContent, 'Calendar');
+  await planner.toggle();
+  await planner.toggle();
+  await click('Calendar settings');
+  assert.equal(host.shadowRoot.querySelector('[data-context-code="group_44"]').checked, false);
+});
+
+test('Canvas completed items show a completed bar and a read-only completion source', async () => {
+  const { host, planner } = setup(async () => ({
+    profile: fixture.profile, contexts: [{ code: 'course_1', name: 'Course 1' }], events: [],
+    assignments: [{ ...fixture.assignment, assignment: { ...fixture.assignmentDetail, user_submitted: true } }],
+    range: { startDate: '2026-03-01', endDate: '2027-03-31' }
+  }));
+  await planner.toggle();
+  const bar = host.shadowRoot.querySelector('[data-item-key="assignment:987"]');
+  assert.equal(bar.classList.contains('completed'), true);
+  bar.click();
+  const complete = host.shadowRoot.querySelector('[aria-label="Mark complete"]');
+  assert.equal(complete.checked, true);
+  assert.equal(complete.disabled, true);
+  assert.match(host.shadowRoot.querySelector('.detail').textContent, /Completed in Canvas/);
+});
+
+test('reopening settings for another account resets the selection draft', async () => {
+  let id = 77;
+  const { host, planner, click } = setup(async () => ({
+    profile: { ...fixture.profile, id }, contexts: [{ code: 'course_1', name: 'Course 1' }],
+    selectedCalendars: id === 77 ? ['course_1'] : [], events: [], assignments: [],
+    range: { startDate: '2026-03-01', endDate: '2027-03-31' }
+  }));
+  await planner.toggle();
+  await click('Calendar settings');
+  assert.equal(host.shadowRoot.querySelector('[data-context-code="course_1"]').checked, true);
+  await planner.toggle();
+  id = 88;
+  await planner.toggle();
+  assert.equal(host.shadowRoot.querySelector('[data-context-code="course_1"]').checked, false);
 });
 
 test('calendar hash month is used when valid and falls back to current month', () => {

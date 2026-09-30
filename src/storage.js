@@ -7,6 +7,8 @@ export function createPlannerStore(storageArea, hostname, userId) {
     async load() {
       const entries = await storageArea.get(null);
       const state = { starts: {}, completed: {} };
+      const selection = entries[`${prefix}calendars`];
+      if (Array.isArray(selection)) state.selectedCalendars = selection.filter(code => typeof code === 'string' && /^(user|course|group|account)_\d+$/.test(code));
       for (const [key, value] of Object.entries(entries)) {
         if (key.startsWith(`${prefix}start:`) && typeof value === 'string') {
           state.starts[key.slice(`${prefix}start:`.length)] = value;
@@ -23,6 +25,9 @@ export function createPlannerStore(storageArea, hostname, userId) {
     async setCompleted(itemKey, completed) {
       if (completed) await storageArea.set({ [completedKey(itemKey)]: true });
       else await storageArea.remove(completedKey(itemKey));
+    },
+    async setSelectedCalendars(codes) {
+      await storageArea.set({ [`${prefix}calendars`]: [...new Set(codes)] });
     }
   };
 }

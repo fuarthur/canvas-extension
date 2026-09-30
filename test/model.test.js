@@ -13,6 +13,20 @@ const snapshot = (overrides = {}) => ({
 });
 const state = { starts: {}, completed: {} };
 
+test('Canvas user completion is combined with local marks, never class-wide submissions', () => {
+  for (const [assignment, expected] of [
+    [{ user_submitted: true }, true],
+    [{ user_submitted: false, has_submitted_submissions: true }, false],
+    [{ submission: { user_id: 77, workflow_state: 'submitted' } }, true],
+    [{ submission: { user_id: 88, workflow_state: 'graded' } }, false],
+    [{ user_submitted: false, submission: { user_id: 77, workflow_state: 'graded' } }, false]
+  ]) {
+    const [item] = normalizeItems(snapshot({ events: [], assignments: [{ ...fixture.assignment, assignment: { ...fixture.assignmentDetail, ...assignment } }] }), state);
+    assert.equal(item.completed, expected);
+    assert.equal(item.canvasCompleted, expected);
+  }
+});
+
 test('event retains its real start and end dates and assignment uses unlock date', () => {
   const items = normalizeItems(snapshot(), state);
   assert.deepEqual(items.map(item => [item.key, item.startDay, item.endDay]), [

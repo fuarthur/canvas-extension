@@ -15,6 +15,17 @@ export const styles = `
   .close { font-size: 20px; line-height: 1; min-width: 37px; }
   .month-name { min-width: 155px; text-align: center; font-weight: 800; font-size: 18px; color: #13243b; }
   .content { overflow: auto; padding: 20px; flex: 1; }
+  .tabs { display: flex; gap: 8px; padding: 8px 22px; background: #fff; border-bottom: 1px solid #dce3ec; }
+  .tab { border: 0; border-radius: 8px; padding: 9px 16px; background: transparent; color: #52647b; font-size: 14px; font-weight: 700; }
+  .tab[aria-selected=true] { background: #e4edf9; color: #173358; }
+  button:disabled { cursor: default; opacity: .6; }
+  .settings { max-width: 850px; margin: 0 auto; padding: 20px; background: #fff; border: 1px solid #dce3ec; border-radius: 12px; }
+  .settings h2 { margin: 0 0 8px; font-size: 20px; }
+  .settings-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0; }
+  .calendar-choice { display: flex; align-items: center; gap: 12px; padding: 12px 4px; border-top: 1px solid #edf0f4; font-size: 14px; }
+  .calendar-choice input { width: 18px; height: 18px; flex: none; }
+  .calendar-choice .hint { margin: 4px 0 0; }
+  .settings > button { margin: 16px 8px 0 0; }
   .status { background: #fff; border: 1px solid #dce3ec; border-radius: 12px; padding: 26px; color: #34465f; }
   .status.error { border-color: #edb0a7; background: #fff8f7; }
   .weekday-row { display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); margin: 0 0 8px; color: #65758a; font-size: 12px; font-weight: 700; text-transform: uppercase; text-align: right; }

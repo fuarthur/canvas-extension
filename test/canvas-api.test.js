@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { CanvasApiError, fetchPages, loadCanvasSnapshot } from '../src/canvas-api.js';
 
+import * as canvasApi from '../src/canvas-api.js';
+
 const fixture = JSON.parse(await readFile(new URL('./fixtures/canvas-pages.json', import.meta.url)));
 const origin = 'https://canvas.illinois.edu';
 const json = (value, headers = {}) => new Response(JSON.stringify(value), {
@@ -120,4 +122,87 @@ test('loadCanvasSnapshot batches 12 contexts including account calendars and ret
   assert.equal(calendarUrls.length, 4);
   assert.equal(snapshot.events.length, 2);
   assert.equal(snapshot.assignments[0].assignment.unlock_at, '2026-09-02T00:00:00-05:00');
+});
+
+test('saved calendar selection is applied before any event or assignment request', async () => {
+  const requested = [];
+  const base = calendarFetch(() => 200);
+  const snapshot = await loadCanvasSnapshot({ month: '2026-09', readSelection: async id => {
+    assert.equal(id, 77);
+    return ['course_1'];
+  }, fetchImpl: async input => {
+    const url = new URL(input);
+    if (url.pathname === '/api/v1/calendar_events') {
+      requested.push(url);
+      assert.deepEqual(url.searchParams.getAll('context_codes[]'), ['course_1']);
+      if (url.searchParams.get('type') === 'assignment') assert.ok(url.searchParams.getAll('include[]').includes('submission'));
+    }
+    return base(input);
+  } });
+  assert.equal(requested.length, 2);
+  assert.equal(snapshot.contexts.length, 3);
+  assert.deepEqual(snapshot.selectedCalendars, ['course_1']);
+});
+
+test('deselecting every calendar skips all calendar requests and preserves configuration', async () => {
+  let calls = 0;
+  const base = calendarFetch(() => 200);
+  const snapshot = await loadCanvasSnapshot({ month: '2026-09', readSelection: async () => [], fetchImpl: async input => {
+    if (new URL(input).pathname === '/api/v1/calendar_events') calls++;
+    return base(input);
+  } });
+  assert.equal(calls, 0);
+  assert.deepEqual(snapshot.events, []);
+  assert.deepEqual(snapshot.assignments, []);
+  assert.equal(snapshot.contexts.length, 3);
+});
+
+test('loader reuses directory and denied contexts but refreshes completion and checks the user', async () => {
+  let id = 77;
+  let submitted = false;
+  let now = 0;
+  const calls = [];
+  const base = calendarFetch(codes => codes.includes('group_44') ? 403 : 200);
+  const loader = canvasApi.createCanvasLoader({ now: () => now, fetchImpl: async input => {
+    const url = new URL(input);
+    calls.push(url);
+    if (url.pathname.endsWith('/profile')) return json({ ...fixture.profile, id });
+    const response = await base(input);
+    if (url.pathname === '/api/v1/calendar_events' && url.searchParams.get('type') === 'assignment' && response.ok) {
+      const rows = await response.json();
+      return json(rows.map(row => ({ ...row, assignment: { ...row.assignment, user_submitted: submitted } })));
+    }
+    return response;
+  } });
+  await loader('2026-09');
+  calls.length = 0;
+  submitted = true;
+  const refreshed = await loader('2026-09');
+  assert.equal(calls.filter(url => url.pathname === '/api/v1/courses').length, 0);
+  assert.equal(calls.filter(url => url.pathname.endsWith('/profile')).length, 1);
+  assert.equal(calls.filter(url => url.pathname === '/api/v1/calendar_events').length, 2);
+  assert.ok(calls.filter(url => url.pathname === '/api/v1/calendar_events').every(url => !url.searchParams.getAll('context_codes[]').includes('group_44')));
+  assert.equal(refreshed.assignments[0].assignment.user_submitted, true);
+  assert.match(refreshed.warnings[0], /Old lab group/);
+  calls.length = 0;
+  id = 88;
+  await loader('2026-09');
+  assert.equal(calls.filter(url => url.pathname === '/api/v1/courses').length, 1);
+  assert.ok(calls.some(url => url.searchParams.getAll('context_codes[]').includes('group_44')));
+  calls.length = 0;
+  id = 77;
+  now = 300001;
+  await loader('2026-09');
+  assert.equal(calls.filter(url => url.pathname === '/api/v1/courses').length, 1);
+  assert.ok(calls.some(url => url.searchParams.getAll('context_codes[]').includes('group_44')));
+});
+
+test('explicit permission retry rechecks denied calendars before cache expiry', async () => {
+  let allowed = false;
+  const base = calendarFetch(codes => !allowed && codes.includes('group_44') ? 403 : 200);
+  const loader = canvasApi.createCanvasLoader({ fetchImpl: base });
+  await loader('2026-09');
+  allowed = true;
+  const snapshot = await loader('2026-09', { retryUnavailable: true });
+  assert.deepEqual(snapshot.warnings, []);
 });
