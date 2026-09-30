@@ -75,3 +75,14 @@ export function daysBetween(startDate,endDate){
  if(!validDay(startDate)||!validDay(endDate)||endDate<startDate)throw new Error('Invalid date range');
  const result=[];for(let day=startDate;day<=endDate;day=addDays(day,1))result.push(day);return result;
 }
+
+const zonedFormatters=new Map();
+export function zonedDateTime(day,time,timeZone,{disambiguation='earlier'}={}){
+ if(!validDay(day)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(time||''))return null;
+ let formatter;try{formatter=zonedFormatters.get(timeZone);if(!formatter){formatter=new Intl.DateTimeFormat('en-US',{timeZone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});zonedFormatters.set(timeZone,formatter);}}catch{return null;}
+ const local=ms=>Object.fromEntries(formatter.formatToParts(new Date(ms)).filter(p=>p.type!=='literal').map(p=>[p.type,p.value]));
+ const target=Date.parse(`${day}T${time}:00Z`);const offsets=new Set();
+ for(let h=-48;h<=48;h+=6){const ms=target+h*3600000;const p=local(ms);offsets.add(Date.UTC(Number(p.year),Number(p.month)-1,Number(p.day),Number(p.hour),Number(p.minute),Number(p.second))-ms);}
+ const candidates=[...offsets].map(offset=>target-offset).filter(ms=>{const p=local(ms);return `${p.year}-${p.month}-${p.day}`===day&&`${p.hour}:${p.minute}`===time;}).sort((a,b)=>a-b);
+ return candidates.length?new Date(disambiguation==='later'?candidates.at(-1):candidates[0]).toISOString():null;
+}
