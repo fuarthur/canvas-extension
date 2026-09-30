@@ -13,6 +13,28 @@ export function nativeCalendarSelection(document) {
     .map(row => row.dataset.context).filter(code => /^(user|course|group|account)_\d+$/.test(code));
 }
 
+export function mountCalendarEntry({ document, onOpen }) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'btn';
+  button.textContent = 'Planning';
+  button.setAttribute('aria-label', 'Open planning calendar');
+  button.setAttribute('aria-haspopup', 'dialog');
+  button.addEventListener('click', event => {
+    // Canvas delegates its native view switching to this button group.
+    event.stopPropagation();
+    onOpen();
+  });
+  const restore = () => {
+    const group = document.querySelector('.calendar_view_buttons[role="tablist"]');
+    if (group && button.parentElement !== group) group.append(button);
+  };
+  const observer = new document.defaultView.MutationObserver(restore);
+  observer.observe(document.body, { childList: true, subtree: true });
+  restore();
+  return () => { observer.disconnect(); button.remove(); };
+}
+
 export function monthFromCalendarHash(hash, now = new Date()) {
   const value = new URLSearchParams(String(hash).replace(/^#/, '')).get('view_start');
   return /^\d{4}-(0[1-9]|1[0-2])(-\d{2})?$/.test(value ?? '') ? value.slice(0, 7) : monthOf(now);
@@ -350,13 +372,24 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, initialMonth, n
     root.replaceChildren(style, backdrop);
   }
 
-  async function toggle() {
-    if (open) { close(); return; }
+  async function show(nextMonth) {
+    if (open) return;
+    if (nextMonth) {
+      month = nextMonth;
+      activeTab = 'calendar';
+      selectedKey = null;
+      expandedWeeks.clear();
+    }
     open = true;
     document.body.append(host);
     document.addEventListener('keydown', onKeyDown);
     await load(true);
   }
 
-  return { toggle, destroy: close };
+  async function toggle() {
+    if (open) { close(); return; }
+    await show();
+  }
+
+  return { show, toggle, destroy: close };
 }

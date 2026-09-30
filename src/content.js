@@ -1,6 +1,6 @@
 import { createCanvasLoader } from './canvas-api.js';
 import { createPlannerStore } from './storage.js';
-import { mountPlanner, monthFromCalendarHash, nativeCalendarSelection } from './view.js';
+import { mountPlanner, mountCalendarEntry, monthFromCalendarHash, nativeCalendarSelection } from './view.js';
 
 if (location.pathname.startsWith('/calendar')) {
   const host = document.createElement('div');
@@ -12,6 +12,7 @@ if (location.pathname.startsWith('/calendar')) {
     storeFactory,
     initialMonth: monthFromCalendarHash(location.hash, new Date())
   });
+  mountCalendarEntry({ document, onOpen: () => planner.show(monthFromCalendarHash(location.hash, new Date())) });
   chrome.runtime.onMessage.addListener(message => {
     if (message?.type === 'PLANNER_TOGGLE') planner.toggle();
   });
