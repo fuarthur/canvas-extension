@@ -1,6 +1,6 @@
 import {setText,setLabel,intlLocale} from './i18n.js';
 import {ui} from './ui.js';import {dateKey,zonedDateTime} from './dates.js';import {suggestSegment} from './plan-validation.js';import {updatePlan} from './plans.js';
-export function renderPlanEditor({document,plan,itemKey,day,segmentId,editorValues,facts,onApply,onClose}){
+export function renderPlanEditor({document,plan,itemKey,day,segmentId,editorValues,initialIssues,addedOnDrop,facts,onApply,onClose}){
  const {el,input,field,button}=ui(document);const existing=plan.segments.find(s=>s.id===segmentId);const task=plan.tasks[itemKey];const panel=el('section','arrange-editor');panel.setAttribute('role','dialog');setLabel(panel,'Arrange task');panel.dataset.editorKey=JSON.stringify([itemKey,day,segmentId]);panel.append(el('h3','',task.title,true));
  const used=plan.segments.filter(s=>s.itemKey===itemKey&&s.id!==segmentId).reduce((n,s)=>n+(Date.parse(s.endAt)-Date.parse(s.startAt))/60000,0);
  const date=input('Work date',existing?dateKey(existing.startAt,plan.timeZone):day,'date');date.min=plan.range.startDate;date.max=plan.range.endDate;
@@ -8,11 +8,12 @@ export function renderPlanEditor({document,plan,itemKey,day,segmentId,editorValu
  const clock=existing?new Intl.DateTimeFormat(intlLocale(document,'en-GB'),{timeZone:plan.timeZone,hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(existing.startAt)):'';const start=input('Work start time',clock,'time');const message=el('p','notice');const suggestion=el('p','hint');const conflict=el('div');
  if(editorValues){date.value=editorValues['Work date'];minutes.value=editorValues['Work minutes'];start.value=editorValues['Work start time'];}
  const base=existing?updatePlan(plan,{type:'removeSegment',id:segmentId}):plan;
+ if(addedOnDrop)panel.append(el('p','hint','Work block added to your draft. Adjust it here or remove the block.'));
  const check=()=>{const result=suggestSegment(base,itemKey,{day:date.value,minutes:Number(minutes.value),startTime:start.value||undefined},facts);setText(suggestion,result.segment?`Suggested ${new Intl.DateTimeFormat(intlLocale(document,'en-GB'),{timeZone:plan.timeZone,hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(result.segment.startAt))} · ${Number(minutes.value)} min`:'Choose a date and duration; the work must fit before the deadline.');return result;};
- for(const n of [date,minutes,start])n.addEventListener('change',check);
+ for(const n of [date,minutes,start])n.addEventListener('change',()=>{setText(message,'');conflict.replaceChildren();check();});
  panel.append(field('Date',date),field('Minutes for this block',minutes),field('Start time (optional)',start),suggestion,message,conflict);
  const apply=segment=>{onApply({type:existing?'updateSegment':'addSegment',...(existing?{id:existing.id,patch:{...segment,id:existing.id,locked:existing.locked,order:existing.order}}:{segment})});onClose();};
  panel.append(button(existing?'Update work block':'Add work block',()=>{const result=check();conflict.replaceChildren();if(result.segment){apply(result.segment);return;}setText(message,result.issues.map(i=>i.message));
   if(start.value&&Number.isInteger(Number(minutes.value))&&Number(minutes.value)>0&&used+Number(minutes.value)<=task.estimateMinutes){const instant=zonedDateTime(date.value,start.value,plan.timeZone);if(instant&&date.value>=plan.range.startDate&&date.value<=plan.range.endDate)conflict.append(button('Keep as conflicting draft',()=>apply({id:existing?.id||`manual-${Date.now()}`,itemKey,startAt:instant,endAt:new Date(Date.parse(instant)+Number(minutes.value)*60000).toISOString(),locked:existing?.locked||false,order:existing?.order??plan.segments.length}),'text-button','Keep as conflicting draft — requires fixing'));}
- }),button('Cancel arranging task',onClose,'text-button','Cancel'));check();return panel;
+ }),button('Cancel arranging task',onClose,'text-button','Cancel'));check();if(initialIssues?.length)setText(message,initialIssues.map(issue=>issue.message));return panel;
 }

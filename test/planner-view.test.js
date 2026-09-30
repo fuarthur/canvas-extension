@@ -42,3 +42,48 @@ test('newly loaded tasks within the plan range are included before generation',a
 test('configuration stays open when editing capacities redraws the plan',async()=>{
  const s=await setup();await s.click('New plan');s.root.querySelector('.plan-configuration').open=true;s.change('Sun capacity minutes',0);assert.equal(s.root.querySelector('.plan-configuration').open,true);s.dom.window.close();
 });
+
+function dropTask(s,key,day){
+ const target=s.root.querySelector(`[data-plan-day="${day}"]`);const event=new s.dom.window.Event('drop',{bubbles:true,cancelable:true});Object.defineProperty(event,'dataTransfer',{value:{getData:type=>type==='application/x-canvas-planner-task'?key:''}});target.dispatchEvent(event);
+}
+
+test('dropping a task creates a work block and opens its editor in the target date',async()=>{
+ const s=await setup();await s.click('New plan');dropTask(s,'assignment:1','2026-10-02');
+ const day=s.root.querySelector('[data-plan-day="2026-10-02"]'),row=day.querySelector('[data-segment-id]');assert.ok(row,'drop should add the block immediately');
+ assert.equal(row.querySelector('.arrange-editor [data-control-id="Work date"]').value,'2026-10-02');assert.equal(s.root.querySelector('.planner-workbench > .arrange-editor'),null);
+ s.change('Work minutes',30);s.change('Work start time','11:00');await s.click('Update work block');assert.match(s.root.querySelector('[data-plan-day="2026-10-02"]').textContent,/11:00–11:30/);
+ await s.click('Save plan');const saved=Object.values((await s.store.loadPlanningState()).plans)[0];assert.equal(saved.segments.length,1);assert.equal(saved.segments[0].startAt,'2026-10-02T16:00:00.000Z');s.controller.destroy();s.dom.window.close();
+});
+
+test('editing an existing work block expands at that row and does not jump to the top',async()=>{
+ const s=await setup();const scroller=s.dom.window.document.createElement('div');scroller.className='content';s.root.replaceWith(scroller);scroller.append(s.root);
+ await s.click('New plan');await s.click('Arrange Essay');assert.ok(s.root.querySelector('[data-plan-day="2026-10-01"] .arrange-editor'));await s.click('Add work block');
+ const row=s.root.querySelector('[data-segment-id]');scroller.scrollTop=950;await s.click(`Edit block ${row.dataset.segmentId}`);
+ assert.equal(scroller.scrollTop,950);assert.ok(s.root.querySelector(`[data-segment-id="${row.dataset.segmentId}"] .arrange-editor`));
+ s.change('Work start time','10:00');await s.click('Update work block');assert.equal(scroller.scrollTop,950);assert.match(s.root.querySelector('[data-plan-day="2026-10-01"]').textContent,/10:00–11:00/);s.controller.destroy();s.dom.window.close();
+});
+
+test('dropping onto a collapsed date opens it and impossible dates show an inline reason without adding a block',async()=>{
+ const s=await setup([task({dueAt:'2026-10-20T23:59:00-05:00',endDay:'2026-10-20'})]);await s.click('New plan');const before=s.root.querySelector('[data-plan-day="2026-10-10"]');before.open=false;
+ dropTask(s,'assignment:1','2026-10-10');assert.equal(s.root.querySelector('[data-plan-day="2026-10-10"]').open,true);assert.ok(s.root.querySelector('[data-plan-day="2026-10-10"] [data-segment-id] .arrange-editor'));await s.click('Cancel arranging task');
+ await s.click('Save plan');assert.equal(Object.values((await s.store.loadPlanningState()).plans)[0].segments.length,1);s.controller.destroy();s.dom.window.close();
+ const denied=await setup();await denied.click('New plan');dropTask(denied,'assignment:1','2026-10-04');const group=denied.root.querySelector('[data-plan-day="2026-10-04"]');assert.equal(group.querySelectorAll('[data-segment-id]').length,0);assert.ok(group.querySelector('.arrange-editor'));assert.match(group.querySelector('.arrange-editor').textContent,/No available work interval/);denied.controller.destroy();denied.dom.window.close();
+});
+
+test('drop allocates only the remaining work and redraw does not add it twice',async()=>{
+ const s=await setup();await s.click('New plan');await s.click('Arrange Essay');s.change('Work minutes',30);await s.click('Add work block');
+ dropTask(s,'assignment:1','2026-10-02');assert.equal(s.root.querySelector('[data-plan-day="2026-10-02"] [data-control-id="Work minutes"]').value,'30');s.controller.render();
+ await s.click('Cancel arranging task');await s.click('Save plan');const saved=Object.values((await s.store.loadPlanningState()).plans)[0];assert.equal(saved.segments.length,2);assert.equal(saved.segments.reduce((sum,block)=>sum+(Date.parse(block.endAt)-Date.parse(block.startAt))/60000,0),60);s.controller.destroy();s.dom.window.close();
+});
+
+test('arranging in an older plan still opens an editor inside its date range',async()=>{
+ const s=await setup();await s.click('New plan');s.change('Plan start','2026-09-01');s.change('Plan end','2026-09-30');await s.click('Arrange Essay');
+ assert.ok(s.root.querySelector('[data-plan-day="2026-09-30"] .arrange-editor'));assert.equal(s.root.querySelector('[data-control-id="Work date"]').value,'2026-09-30');s.controller.destroy();s.dom.window.close();
+});
+
+test('a verified schedule remains usable when only balancing reaches its time limit',async()=>{
+ const {generateSchedule}=await import('../src/scheduler.js');const s=await setup();let tick=0;
+ const schedulerClient={run:async input=>generateSchedule(input,{clock:()=>tick,budgetMs:50,yieldControl:async()=>{},onProgress:progress=>{if(progress.phase==='balancing')tick=100;}}),cancel(){},destroy(){}};
+ const controller=createPlannerController({...s.options,schedulerClient});const root=controller.render();s.dom.window.document.querySelector('main').append(root);root.querySelector('[aria-label="New plan"]').click();await settle();root.querySelector('[aria-label="Generate balanced plan"]').click();await until(()=>root.querySelector('.generated-preview'));
+ assert.equal(root.querySelector('.generated-preview h3').textContent,'Generated plan preview');assert.match(root.querySelector('.generated-preview').textContent,/schedule passed all checks/);assert.doesNotMatch(root.querySelector('.generated-preview').textContent,/not a fully verified success/);assert.ok(root.querySelector('[aria-label="Accept generated plan"]'));root.querySelector('[aria-label="Accept generated plan"]').click();assert.ok(root.querySelector('[data-segment-id]'));controller.destroy();s.controller.destroy();s.dom.window.close();
+});

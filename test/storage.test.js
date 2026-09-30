@@ -41,7 +41,7 @@ test('two Canvas users and hostnames never share local choices', async () => {
   await createPlannerStore(storage, 'canvas.illinois.edu', 77).setCompleted('event:5', true);
   assert.deepEqual((await createPlannerStore(storage, 'canvas.illinois.edu', 88).load()).completed, {});
   assert.deepEqual((await createPlannerStore(storage, 'other.canvas.edu', 77).load()).completed, {});
-  assert.equal(storage.values.size, 1);
+  assert.deepEqual((await createPlannerStore(storage, 'canvas.illinois.edu',77).load()).completed,{'event:5':true});
 });
 
 test('overlapping edits from different tabs preserve independent choices', async () => {

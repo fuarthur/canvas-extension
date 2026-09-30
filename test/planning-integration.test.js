@@ -16,3 +16,39 @@ test('transient refresh failures expose retry and preserve the unsaved planner d
  const s=await setup();await s.click('Planner view');await s.click('New plan');const name=s.host.shadowRoot.querySelector('[aria-label="Plan name"]');name.value='Keep my draft';name.dispatchEvent(new s.dom.window.Event('change'));
  s.fail(true);await s.click('Refresh calendar');assert.match(s.host.shadowRoot.textContent,/Failed to fetch/);assert.ok(s.host.shadowRoot.querySelector('[aria-label="Retry loading"]'));s.fail(false);await s.click('Retry loading');assert.equal(s.host.shadowRoot.querySelector('[aria-label="Plan name"]').value,'Keep my draft');assert.match(s.host.shadowRoot.textContent,/Unsaved changes/);s.planner.destroy();s.dom.window.close();
 });
+
+test('Tasks and overdue shortcuts share history filtering, save targets and extend ranges',async()=>{
+ const dom=new JSDOM('<main/>',{url:'https://canvas.illinois.edu/calendar'}),host=dom.window.document.createElement('div'),area=memoryStorage(),store=createPlannerStore(area,'canvas.illinois.edu',77);
+ const assignment=(id,title,due)=>({id:`assignment_${id}`,title,context_code:'course_456',assignment:{due_at:due,unlock_at:null,user_submitted:false}});
+ let range={startDate:'2026-03-01',endDate:'2027-03-31'},calls=0;
+ const planner=mountPlanner({host,storeFactory:()=>createPlannerStore(area,'canvas.illinois.edu',77),initialMonth:'2026-09',now:()=>new Date('2026-09-30T15:00:00Z'),loadSnapshot:async(_month,options)=>{calls++;if(options.range)range=options.range;return {profile:{id:77,time_zone:'America/Chicago'},contexts:[{code:'course_456',name:'EPSY 456'}],selectedCalendars:['course_456'],events:[],assignments:[assignment(1,'Current overdue','2026-09-29T20:00:00-05:00'),assignment(2,'Spring homework','2026-05-01T20:00:00-05:00')],range};}});
+ await planner.show();const root=host.shadowRoot;
+ const click=async label=>{const n=root.querySelector(`[data-control-id="${label}"]`);assert.ok(n,label);n.click();await settle();};
+ const change=async(label,value)=>{const n=root.querySelector(`[data-control-id="${label}"]`);assert.ok(n,label);n.value=value;n.dispatchEvent(new dom.window.Event('change'));await settle();};
+ assert.match(root.querySelector('.today-summary').textContent,/1 overdue/);await click('View overdue homework');assert.equal(root.querySelectorAll('[data-task-row]').length,1);
+ await click('Open Current overdue');await change('Planned finish date','2026-10-01');await change('Planned finish time','20:00');await click('Save planned finish');assert.equal((await store.loadPlanningState()).targets['assignment:1'].time,'20:00');await click('Close details');
+ await change('Tasks range start','2026-01-01');await change('Tasks range end','2027-05-31');await click('Load task date range');assert.equal(range.startDate,'2026-01-01');assert.equal(range.endDate,'2027-05-31');assert.equal(calls,2);
+ await click('Select all filtered tasks');await change('Bulk estimate minutes','90');await click('Set selected estimates');assert.equal((await store.loadPlanningState()).estimates['assignment:1'],90);
+ await click('Calendar settings');await change('Historical homework mode','off');await click('Save planning settings');await click('Task list view');assert.equal(root.querySelectorAll('[data-task-row]').length,2);
+ planner.destroy();dom.window.close();
+});
+
+test('saving planning settings keeps the scroll position, open sections and visible success message',async()=>{
+ const s=await setup();await s.click('Calendar settings');const root=s.host.shadowRoot;
+ const editor=root.querySelector('.planning-settings'),details=editor.querySelector('.schedule-settings');details.open=true;
+ const preview=root.querySelector('[data-control-id="Preview title"]');preview.value='Keep this preview';preview.dispatchEvent(new s.dom.window.Event('change'));
+ const field=root.querySelector('[data-control-id="Default estimate minutes"]');field.value='45';field.dispatchEvent(new s.dom.window.Event('change'));
+ root.querySelector('.content').scrollTop=720;await s.click('Save planning settings');
+ assert.equal(root.querySelector('.content').scrollTop,720);assert.equal(root.querySelector('.planning-settings'),editor);assert.equal(root.querySelector('.schedule-settings').open,true);
+ assert.match(root.querySelector('[role="status"]').textContent,/Planning settings saved/);assert.equal(root.querySelector('[data-control-id="Preview title"]').value,'Keep this preview');
+ assert.equal((await s.factory(77).loadPlanningState()).settings.defaultMinutes,45);
+ for(const listener of s.listeners)listener({});await settle();assert.equal(root.querySelector('.content').scrollTop,720);assert.match(root.querySelector('[role="status"]').textContent,/Planning settings saved/);
+ s.planner.destroy();s.dom.window.close();
+});
+
+test('failed settings save stays in place with the editable draft and error',async()=>{
+ const s=await setup();await s.click('Calendar settings');s.factory(77).setSettings=async()=>{throw new Error('Storage unavailable');};const root=s.host.shadowRoot;
+ const field=root.querySelector('[data-control-id="Default estimate minutes"]');field.value='45';field.dispatchEvent(new s.dom.window.Event('change'));root.querySelector('.content').scrollTop=720;
+ await s.click('Save planning settings');assert.equal(root.querySelector('.content').scrollTop,720);assert.equal(root.querySelector('[data-control-id="Default estimate minutes"]').value,'45');
+ assert.match(root.textContent,/Storage unavailable/);assert.doesNotMatch(root.textContent,/Planning settings saved/);assert.equal(root.querySelector('[data-control-id="Save planning settings"]').disabled,false);s.planner.destroy();s.dom.window.close();
+});

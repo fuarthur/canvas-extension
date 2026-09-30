@@ -13,3 +13,10 @@ test('invalid settings remain editable and show a validation message',async()=>{
  const dom=new JSDOM('');let saved=false;const root=renderPlanningSettings({document:dom.window.document,state:planningState(),contexts:[],onSave:async()=>{saved=true;}});
  const input=root.querySelector('[aria-label="Red pressure starts at"]');input.value='2';input.dispatchEvent(new dom.window.Event('change'));root.querySelector('[aria-label="Save planning settings"]').click();await settle();assert.equal(saved,false);assert.match(root.textContent,/thresholds/);
 });
+
+test('historical homework policy saves configurable months and rejects invalid cutoffs',async()=>{
+ const dom=new JSDOM('');let saved;const root=renderPlanningSettings({document:dom.window.document,state:planningState(),contexts:[],onSave:async value=>{saved=value;}});
+ const mode=root.querySelector('[data-control-id="Historical homework mode"]');assert.ok(mode);mode.value='months';mode.dispatchEvent(new dom.window.Event('change'));
+ const months=root.querySelector('[data-control-id="Ignore overdue older than months"]');months.value='0';months.dispatchEvent(new dom.window.Event('change'));root.querySelector('[data-control-id="Save planning settings"]').click();await settle();assert.equal(saved,undefined);
+ months.value='3';months.dispatchEvent(new dom.window.Event('change'));root.querySelector('[data-control-id="Save planning settings"]').click();await settle();assert.deepEqual(saved.historyFilter,{mode:'months',months:3});dom.window.close();
+});

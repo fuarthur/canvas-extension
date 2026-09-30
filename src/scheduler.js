@@ -1,12 +1,15 @@
-import {dateKey} from './dates.js';import {buildAvailability,subtractIntervals} from './availability.js';import {taskBounds,fixedFacts,validatePlan} from './plan-validation.js';import {resolvePlanTasks,planSeries} from './plans.js';
+import {dateKey} from './dates.js';import {buildAvailability,subtractIntervals} from './availability.js';import {taskBounds,fixedFacts,validatePlan} from './plan-validation.js';import {resolvePlanTasks,planSeries,intervalDays} from './plans.js';
 const duration=s=>(Date.parse(s.endAt)-Date.parse(s.startAt))/60000;
 const cloneDays=days=>days.map(d=>({...d,intervals:d.intervals.map(i=>({...i}))}));
 export async function generateSchedule(input,{signal,onProgress=()=>{},yieldControl=()=>new Promise(r=>setTimeout(r,0)),budgetMs=5000,clock=Date.now}={}){
- const {plan,items=[],completed={},now,loadedRange}=input;const started=clock();const facts={items,completed,now,loadedRange};let counter=0,states=0,stop=null;let best=[];let before={peak:0,variance:0,buffer:0};let after=before;
+ const {plan,items=[],completed={},now,loadedRange,historyFilter}=input;const started=clock();const facts={items,completed,now,loadedRange,historyFilter};let counter=0,states=0,stop=null;let best=[];let before={peak:0,variance:0,buffer:0};let after=before;
  const dayCache=new Map();const dayOf=instant=>{if(!dayCache.has(instant))dayCache.set(instant,dateKey(instant,plan.timeZone));return dayCache.get(instant);};
  const resolved=resolvePlanTasks(plan,facts);const retained=plan.segments.filter(s=>s.locked||resolved.tasks[s.itemKey]?.completed).map(s=>({...s}));best=retained;
  const checked=validatePlan({...plan,segments:retained},facts);const pending=Object.values(plan.tasks).filter(t=>t.type==='assignment'&&!resolved.tasks[t.key]?.completed);const live=new Map(items.map(i=>[i.key,i]));
- const checkpoint=async force=>{if(signal?.aborted){stop='cancelled';return false;}if(clock()-started>budgetMs){stop='timeout';return false;}if(force){await yieldControl();if(signal?.aborted){stop='cancelled';return false;}if(clock()-started>budgetMs){stop='timeout';return false;}}return true;};
+ // Check every batch, but only suspend once per frame. Repeated zero-delay
+ // timers are clamped by browsers and can consume the entire generation budget.
+ let lastYield=-Infinity;
+ const checkpoint=async force=>{if(signal?.aborted){stop='cancelled';return false;}const tick=clock();if(tick-started>budgetMs){stop='timeout';return false;}if(force&&tick-lastYield>=16){await yieldControl();lastYield=clock();if(signal?.aborted){stop='cancelled';return false;}if(lastYield-started>budgetMs){stop='timeout';return false;}}return true;};
  const finish=(segments=best)=>{const validation=validatePlan({...plan,segments},facts);const issues=[...validation.issues];for(const [itemKey,missingMinutes]of Object.entries(validation.unassigned))issues.push({code:'UNASSIGNED',itemKey,missingMinutes,message:'Could not fit all estimated work before the deadline. Adjust capacity, dates or splitting.'});return {status:stop||(validation.complete?'complete':'partial'),segments,validation,issues,metrics:{beforePeakMinutes:before.peak,afterPeakMinutes:after.peak,beforeVariance:before.variance,afterVariance:after.variance}};};
  if(!await checkpoint(true))return finish();
  // Overdue tasks stay visible; they do not stop scheduling other feasible tasks.
@@ -46,28 +49,34 @@ export async function generateSchedule(input,{signal,onProgress=()=>{},yieldCont
 
  singles.sort((a,b)=>bounds.get(a.key).end-bounds.get(b.key).end||candidates(a,base.days).length-candidates(b,base.days).length||a.key.localeCompare(b.key));
  const assignedScore=segments=>segments.filter(s=>!resolved.tasks[s.itemKey]?.completed).reduce((n,s)=>n+duration(s),0);let bestScore=assignedScore(best);
+ const balancedFeasible=segments=>{const v=validatePlan({...plan,segments},facts);return v.issues.every(i=>i.code==='OVERDUE')&&Object.keys(v.unassigned).every(key=>bounds.get(key).end<Date.parse(now));};
  async function search(index,days,placed){if(++states>2000||!await checkpoint(states%20===0))return false;
-  if(index===singles.length){const candidate=await pack(days,placed);const score=assignedScore(candidate);if(score>bestScore){best=candidate;bestScore=score;}return validatePlan({...plan,segments:candidate},facts).complete;}
+  if(index===singles.length){const candidate=await pack(days,placed);const score=assignedScore(candidate);if(score>bestScore){best=candidate;bestScore=score;}return balancedFeasible(candidate);}
   const task=singles[index];const choices=candidates(task,days);for(const choice of choices){const segment=make(task.key,choice.start,needs.get(task.key));if(await search(index+1,occupy(days,segment),[...placed,segment]))return true;if(stop||states>2000)break;}
   // Keep a partial preview that still arranges the remaining feasible work.
   if(!stop&&states<=2000)await search(index+1,days,placed);return false;
  }
  await search(0,cloneDays(base.days),[]);if(stop)return finish();
- const balancedFeasible=segments=>{const v=validatePlan({...plan,segments},facts);return v.issues.every(i=>i.code==='OVERDUE')&&Object.keys(v.unassigned).every(key=>bounds.get(key).end<Date.parse(now));};
- function measure(segments){const points=planSeries({...plan,segments},{items,completed,mode:'remaining'});const working=points.filter(p=>capacities.get(p.day)>0);const total=working.reduce((n,p)=>n+p.minutes,0);const capacity=working.reduce((n,p)=>n+capacities.get(p.day),0);const variance=working.reduce((n,p)=>n+(p.minutes-total*capacities.get(p.day)/Math.max(1,capacity))**2/Math.max(1,capacities.get(p.day)),0);const buffer=pending.reduce((n,t)=>{const last=segments.filter(s=>s.itemKey===t.key).map(s=>Date.parse(s.endAt)).sort((a,b)=>a-b).at(-1);return n+Math.max(0,(last||0)-(bounds.get(t.key).end-86400000));},0);return {peak:Math.max(0,...points.map(p=>p.minutes)),variance,buffer,points};}
+ const fixedPoints=planSeries({...plan,segments:[]},{items,completed,mode:'remaining'});const segmentDays=new Map();const baseDays=new Map(base.days.map(day=>[day.day,day]));
+ function measure(segments){
+  const points=fixedPoints.map(p=>({...p})),byDay=new Map(points.map(p=>[p.day,p])),lastEnds=new Map();
+  for(const segment of segments){if(resolved.tasks[segment.itemKey]?.completed)continue;const key=`${segment.startAt}/${segment.endAt}`;let parts=segmentDays.get(key);if(!parts){parts=intervalDays(segment.startAt,segment.endAt,plan.timeZone);segmentDays.set(key,parts);}for(const part of parts){const point=byDay.get(part.day);if(point)point.minutes+=part.minutes;}lastEnds.set(segment.itemKey,Math.max(lastEnds.get(segment.itemKey)||0,Date.parse(segment.endAt)));}
+  const working=points.filter(p=>capacities.get(p.day)>0);const total=working.reduce((n,p)=>n+p.minutes,0);const capacity=working.reduce((n,p)=>n+capacities.get(p.day),0);const variance=working.reduce((n,p)=>n+(p.minutes-total*capacities.get(p.day)/Math.max(1,capacity))**2/Math.max(1,capacities.get(p.day)),0);const buffer=pending.reduce((n,t)=>n+Math.max(0,(lastEnds.get(t.key)||0)-(bounds.get(t.key).end-86400000)),0);return {peak:Math.max(0,...points.map(p=>p.minutes)),variance,buffer,points};
+ }
  before=measure(best);after=before;
  const improves=(a,b)=>a.peak<b.peak-1e-8||(Math.abs(a.peak-b.peak)<1e-8&&(a.variance<b.variance-1e-8||(Math.abs(a.variance-b.variance)<1e-8&&a.buffer<b.buffer)));
  // Preserve feasibility while moving unlocked work toward lower-load legal days.
  let scans=0;
  if(balancedFeasible(best)){balance:for(let iteration=0;iteration<2000;iteration++){
    if(!await checkpoint(true))break;let accepted=false;const points=after.points;const sources=[...points].sort((a,b)=>b.minutes-a.minutes||a.day.localeCompare(b.day));const targets=[...points].filter(p=>capacities.get(p.day)>0).sort((a,b)=>a.minutes-b.minutes||a.day.localeCompare(b.day));
-   outer:for(const source of sources)for(const target of targets){if(source.day===target.day||source.minutes<=target.minutes+1)continue;for(const segment of best.filter(s=>!s.locked&&!resolved.tasks[s.itemKey]?.completed&&dayOf(s.startAt)===source.day)){
+   const movableByDay=new Map(),freeByDay=new Map();for(const segment of best){if(segment.locked||resolved.tasks[segment.itemKey]?.completed)continue;const day=dayOf(segment.startAt);if(!movableByDay.has(day))movableByDay.set(day,[]);movableByDay.get(day).push(segment);}
+   const freeOn=key=>{if(!freeByDay.has(key)){const day=baseDays.get(key),occupied=movableByDay.get(key)||[];freeByDay.set(key,{minutes:(day?.budgetMinutes||0)-occupied.reduce((sum,segment)=>sum+duration(segment),0),intervals:day?.intervals.flatMap(interval=>subtractIntervals({start:Date.parse(interval.startAt),end:Date.parse(interval.endAt)},occupied.map(segment=>({start:Date.parse(segment.startAt),end:Date.parse(segment.endAt)}))))||[]});}return freeByDay.get(key);};
+   outer:for(const source of sources)for(const target of targets){if(source.day===target.day||source.minutes<=target.minutes+1)continue;for(const segment of movableByDay.get(source.day)||[]){
      if(++scans%25===0&&!await checkpoint(true))break balance;
      const task=plan.tasks[segment.itemKey];if(task.type!=='assignment')continue;const window=boundDays.get(task.key);if(target.day<window.start||target.day>window.end)continue;const chunk=task.singleSession?duration(segment):Math.min(duration(segment),Math.floor((source.minutes-target.minutes)/2));if(chunk<=0)continue;
      const shortened=best.filter(s=>s.id!==segment.id);if(chunk<duration(segment))shortened.push({...segment,endAt:new Date(Date.parse(segment.endAt)-chunk*60000).toISOString()});
-     const occupied=shortened.filter(s=>!s.locked&&!resolved.tasks[s.itemKey]?.completed&&dayOf(s.startAt)===target.day);const day=base.days.find(d=>d.day===target.day);if(!day||day.budgetMinutes-occupied.reduce((n,s)=>n+duration(s),0)<chunk)continue;const bound=bounds.get(task.key);
-     const free=day.intervals.flatMap(i=>subtractIntervals({start:Date.parse(i.startAt),end:Date.parse(i.endAt)},occupied.map(s=>({start:Date.parse(s.startAt),end:Date.parse(s.endAt)}))));
-     for(const interval of free){const begin=Math.max(interval.start,bound.start);if(begin+chunk*60000>Math.min(interval.end,bound.end))continue;const candidate=[...shortened,make(task.key,begin,chunk)];const score=measure(candidate);if(improves(score,after)&&balancedFeasible(candidate)){best=candidate;after=score;accepted=true;onProgress({phase:'balancing',peakMinutes:score.peak});break outer;}}
+     const free=freeOn(target.day);if(free.minutes<chunk)continue;const bound=bounds.get(task.key);
+     for(const interval of free.intervals){const begin=Math.max(interval.start,bound.start);if(begin+chunk*60000>Math.min(interval.end,bound.end))continue;const candidate=[...shortened,make(task.key,begin,chunk)];const score=measure(candidate);if(improves(score,after)&&balancedFeasible(candidate)){best=candidate;after=score;accepted=true;onProgress({phase:'balancing',peakMinutes:score.peak});break outer;}}
    }}if(!accepted)break;
   }}
  const merged=[];for(const s of [...best].sort((a,b)=>Date.parse(a.startAt)-Date.parse(b.startAt)||a.id.localeCompare(b.id))){const previous=merged.at(-1);if(previous&&!previous.locked&&!s.locked&&previous.itemKey===s.itemKey&&previous.endAt===s.startAt&&dayOf(previous.startAt)===dayOf(s.startAt))previous.endAt=s.endAt;else merged.push({...s});}

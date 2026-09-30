@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { JSDOM } from 'jsdom';
 import { mountPlanner, monthFromCalendarHash } from '../src/view.js';
 import * as viewApi from '../src/view.js';
+import {createCanvasLoader} from '../src/canvas-api.js';
 
 const fixture = JSON.parse(await readFile(new URL('./fixtures/canvas-pages.json', import.meta.url)));
 const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url)));
@@ -48,6 +49,55 @@ function setup(loadSnapshot = async () => ({
 test('manifest targets only the Illinois Canvas calendar', () => {
   assert.equal(manifest.manifest_version, 3);
   assert.deepEqual(manifest.content_scripts[0].matches, ['https://canvas.illinois.edu/calendar*']);
+});
+
+test('hovering a calendar item highlights every week segment, without highlighting other items in its course', async () => {
+  const { dom, host, planner } = setup();
+  await planner.toggle();
+  const bars = [...host.shadowRoot.querySelectorAll('[data-item-key="assignment:987"]')];
+  assert.equal(bars.length, 4);
+  bars[0].dispatchEvent(new dom.window.MouseEvent('mouseenter'));
+  assert.equal(host.shadowRoot.querySelectorAll('.bar.highlighted').length, 4);
+  assert.ok(bars.every(bar => bar.classList.contains('highlighted')));
+  assert.equal(host.shadowRoot.querySelector('[data-item-key="event:5"]').classList.contains('highlighted'), false);
+  bars[0].dispatchEvent(new dom.window.MouseEvent('mouseleave'));
+  assert.equal(host.shadowRoot.querySelectorAll('.bar.highlighted').length, 0);
+  bars.at(-1).dispatchEvent(new dom.window.MouseEvent('mouseenter'));
+  assert.ok(bars.every(bar => bar.classList.contains('highlighted')));
+  planner.destroy();
+});
+
+test('keyboard focus links calendar segments and survives pointer exit until focus moves away', async () => {
+  const { dom, host, planner } = setup();
+  await planner.toggle();
+  const bars = [...host.shadowRoot.querySelectorAll('[data-item-key="assignment:987"]')];
+  bars[1].focus();
+  assert.ok(bars.every(bar => bar.classList.contains('highlighted')));
+  bars[1].dispatchEvent(new dom.window.MouseEvent('mouseenter'));
+  bars[1].dispatchEvent(new dom.window.MouseEvent('mouseleave'));
+  assert.ok(bars.every(bar => bar.classList.contains('highlighted')));
+  const event = host.shadowRoot.querySelector('[data-item-key="event:5"]');
+  event.focus();
+  assert.ok(bars.every(bar => !bar.classList.contains('highlighted')));
+  assert.equal(event.classList.contains('highlighted'), true);
+  event.blur();
+  assert.equal(host.shadowRoot.querySelectorAll('.bar.highlighted').length, 0);
+  planner.destroy();
+});
+
+test('opening calendar details keeps all segments selected across rerenders and clears on detail close', async () => {
+  const { host, planner, click } = setup();
+  await planner.toggle();
+  host.shadowRoot.querySelector('[data-item-key="assignment:987"]').click();
+  assert.equal(host.shadowRoot.querySelectorAll('.bar.highlighted').length, 4);
+  await click('Refresh calendar');
+  assert.equal(host.shadowRoot.querySelectorAll('.bar.highlighted').length, 4);
+  host.shadowRoot.querySelector('[data-item-key="event:5"]').click();
+  assert.equal(host.shadowRoot.querySelectorAll('.bar.highlighted').length, 1);
+  assert.equal(host.shadowRoot.querySelector('.bar.highlighted').dataset.itemKey, 'event:5');
+  await click('Close details');
+  assert.equal(host.shadowRoot.querySelectorAll('.bar.highlighted').length, 0);
+  planner.destroy();
 });
 
 test('partial calendar warning is visible alongside the loaded items', async () => {
@@ -261,4 +311,40 @@ test('Planner tab protects an unsaved draft when closing the main overlay',async
  const {createPlannerStore}=await import('../src/storage.js');const {memoryStorage}=await import('./helpers/planning.js');const store=createPlannerStore(memoryStorage(),'canvas.illinois.edu',77);
  const planner=mountPlanner({host,storeFactory:()=>store,planClientFactory:()=>({save:async()=>({ok:false,message:'No save'}),remove:async()=>({ok:true})}),initialMonth:'2026-10',now:()=>new Date('2026-10-01T12:00:00Z'),loadSnapshot:async()=>({profile:fixture.profile,contexts:[],events:[],assignments:[],range:{startDate:'2026-10-01',endDate:'2026-12-31'}})});
  await planner.show();host.shadowRoot.querySelector('[aria-label="Planner view"]').click();await new Promise(r=>setTimeout(r,0));host.shadowRoot.querySelector('[aria-label="New plan"]').click();await new Promise(r=>setTimeout(r,0));host.shadowRoot.querySelector('[aria-label="Close planning calendar"]').click();await new Promise(r=>setTimeout(r,0));assert.equal(host.isConnected,true);assert.ok(host.shadowRoot.querySelector('[role="alertdialog"]'));host.shadowRoot.querySelector('[aria-label="Discard draft changes"]').click();await new Promise(r=>setTimeout(r,0));assert.equal(host.isConnected,false);dom.window.close();
+});
+
+test('reopen requests cached data while manual refresh forces current Canvas data',async()=>{
+ const options=[];const {planner,click}=setup(async(_month,value)=>{options.push(value);return {profile:fixture.profile,contexts:[],events:[],assignments:[],range:{startDate:'2026-03-01',endDate:'2027-03-31'}};});
+ await planner.show();await planner.toggle();await planner.show();
+ assert.equal(options[1].force,false);await click('Refresh calendar');assert.equal(options[2].force,true);planner.destroy();
+});
+
+test('cached content stays visible and usable during a background update and network failure',async()=>{
+ let finish;const snapshot={profile:fixture.profile,contexts:[],events:[fixture.event],assignments:[],range:{startDate:'2026-03-01',endDate:'2027-03-31'}};
+ const {planner,host,click}=setup(async(_month,options)=>{await options.onCached(snapshot);return new Promise((_resolve,reject)=>{finish=reject;});});
+ const pending=planner.show();for(let i=0;i<10&&!finish;i++)await new Promise(resolve=>setTimeout(resolve,0));
+ assert.ok(finish,'cached content callback should run before the update completes');
+ assert.ok(host.shadowRoot.querySelector('[data-item-key="event:5"]'));assert.match(host.shadowRoot.textContent,/Updating Canvas calendar/);
+ await click('Task list view');assert.equal(host.shadowRoot.querySelector('[aria-label="Task list view"]').disabled,false);
+ finish(new Error('Network offline'));await pending;
+ assert.ok(host.shadowRoot.querySelector('[data-task-row]'));assert.match(host.shadowRoot.textContent,/last loaded data/);planner.destroy();
+});
+
+test('account switch followed by directory failure cannot expose the previous account tasks',async()=>{
+ let id=77;const json=value=>new Response(JSON.stringify(value),{headers:{'content-type':'application/json'}});
+ const loader=createCanvasLoader({fetchImpl:async input=>{const url=new URL(input);if(url.pathname.endsWith('/profile'))return json({...fixture.profile,id});if(id===88&&url.pathname==='/api/v1/courses')return new Response('',{status:500});if(url.pathname==='/api/v1/account_calendars')return json({account_calendars:[]});if(url.pathname==='/api/v1/calendar_events'&&url.searchParams.get('type')==='event')return json([fixture.event]);return json([]);}});
+ const {planner,host,click}=setup(loader);await planner.show();assert.ok(host.shadowRoot.querySelector('[data-item-key="event:5"]'));
+ id=88;await click('Refresh calendar');assert.equal(host.shadowRoot.querySelector('[data-item-key="event:5"]'),null);planner.destroy();
+});
+
+test('reopening after an unverified profile failure does not show cached account tasks',async()=>{
+ let failed=false;const {planner,host}=setup(async()=>{if(failed)throw new Error('Profile unavailable');return {profile:fixture.profile,contexts:[],events:[fixture.event],assignments:[],range:{startDate:'2026-03-01',endDate:'2027-03-31'}};});
+ await planner.show();await planner.toggle();failed=true;await planner.show();assert.equal(host.shadowRoot.querySelector('[data-item-key="event:5"]'),null);planner.destroy();
+});
+
+test('new account local storage failure clears the previous account before installing data',async()=>{
+ let id=77;const dom=new JSDOM('<main/>',{url:'https://canvas.illinois.edu/calendar'}),host=dom.window.document.createElement('div');
+ const planner=mountPlanner({host,initialMonth:'2026-09',storeFactory:user=>({load:async()=>{if(user===88)throw new Error('Local storage unavailable');return {starts:{},completed:{}};}}),loadSnapshot:async()=>({profile:{...fixture.profile,id},contexts:[],events:[fixture.event],assignments:[],range:{startDate:'2026-03-01',endDate:'2027-03-31'}})});
+ await planner.show();id=88;host.shadowRoot.querySelector('[aria-label="Refresh calendar"]').click();await new Promise(resolve=>setTimeout(resolve,0));
+ assert.equal(host.shadowRoot.querySelector('[data-item-key="event:5"]'),null);assert.match(host.shadowRoot.textContent,/Local storage unavailable/);planner.destroy();dom.window.close();
 });

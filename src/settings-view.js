@@ -1,5 +1,6 @@
 import {setText,translate} from './i18n.js';
 import {ui,newId} from './ui.js';import {validateSettings} from './planning-settings.js';import {resolveEstimate} from './estimates.js';
+import {defaultHistoryFilter} from './tasks.js';
 export function renderScheduleEditor({document,schedule,onChange}){
  const {el,input,field,button}=ui(document);const panel=el('section','schedule-editor');
  panel.append(el('p','hint','Daily capacity includes the actual time occupied by calendar events. Set capacity to 0 for a rest day.'));
@@ -8,7 +9,11 @@ export function renderScheduleEditor({document,schedule,onChange}){
  const date=input('Override date','','date');panel.append(el('h3','','Date overrides'),exceptions,date,button('Add date override',()=>{if(!date.value)return;schedule.exceptions[date.value]={start:'09:00',end:'21:00',maxMinutes:0};drawExceptions();onChange?.();}));drawExceptions();return panel;
 }
 export function renderPlanningSettings({document,state,contexts,onSave}){
- const {el,input,field,button,select}=ui(document);const draft=structuredClone(state.settings);const panel=el('section','planning-settings');const notice=el('p','notice');panel.append(el('h2','','Estimates & pressure'),el('p','hint','Manual estimates override the first matching enabled rule, then the default. Saved plans keep their own estimates.'));
+ const {el,input,field,button,select}=ui(document);const draft=structuredClone(state.settings);const panel=el('section','planning-settings');const notice=el('p','notice');notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');panel.append(el('h2','','Estimates & pressure'),el('p','hint','Manual estimates override the first matching enabled rule, then the default. Saved plans keep their own estimates.'));
+ draft.historyFilter||=defaultHistoryFilter();
+ const history=el('div','history-settings');history.append(el('h3','','Historical homework'),el('p','hint','Hide expired homework before the current semester: January–May, June–July, or August–December. You can view hidden tasks in the task list.'));
+ const months=input('Ignore overdue older than months',draft.historyFilter.months,'number',value=>{draft.historyFilter.months=value;});months.min='1';months.max='24';months.step='1';months.disabled=draft.historyFilter.mode!=='months';
+ history.append(field('History filter',select('Historical homework mode',[['semester','Current semester'],['months','Older than X months'],['off','Show all history']],draft.historyFilter.mode,value=>{draft.historyFilter.mode=value;months.disabled=value!=='months';})),field('Months',months));panel.append(history);
  const top=el('div','form-grid');for(const [label,key]of [['Default estimate minutes','defaultMinutes'],['Yellow pressure starts at','yellowFrom'],['Red pressure starts at','redFrom']])top.append(field(label,input(label,draft[key],'number',v=>{draft[key]=v;drawPreview();})));panel.append(top,el('h3','','Estimate rules'));
  const rules=el('div');const preview=el('div','estimate-preview');preview.dataset.estimatePreview='';let previewTitle='';let previewContext=contexts[0]?.code||'';
  const drawPreview=()=>{const result=resolveEstimate({key:'preview',title:previewTitle,contextCodes:[previewContext]},{settings:draft,estimates:{}});setText(preview,`${result.minutes} min · ${result.label}`);};

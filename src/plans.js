@@ -1,10 +1,11 @@
 import {dateKey,daysBetween} from './dates.js';
 import {resolveEstimate} from './estimates.js';
 import {validateSchedule} from './planning-settings.js';
+import {isHistoricalTask} from './tasks.js';
 export function snapshotTask(item,state){return {...structuredClone(item),estimateMinutes:resolveEstimate(item,state).minutes,singleSession:Boolean(state.singleSessions?.[item.key]),completedAtSave:Boolean(item.completed||state.completed?.[item.key])};}
 export function createPlan({id,name,items,state,startDate,endDate,timeZone,now}){
  if(daysBetween(startDate,endDate).length>180||validateSchedule(state.settings.schedule).length)throw new Error('Choose a valid plan range of 1–180 days.');
- const tasks={};for(const item of items){if(item.completed||state.completed?.[item.key])continue;const included=item.type==='assignment'?item.endDay<=endDate:item.startDay<=endDate&&item.endDay>=startDate;if(included)tasks[item.key]=snapshotTask(item,state);}
+ const tasks={};for(const item of items){if(item.completed||state.completed?.[item.key]||isHistoricalTask(item,state,{now,timeZone}))continue;const included=item.type==='assignment'?item.endDay<=endDate:item.startDay<=endDate&&item.endDay>=startDate;if(included)tasks[item.key]=snapshotTask(item,state);}
  const stamp=new Date(now).toISOString();return {schemaVersion:1,id,name,revision:0,createdAt:stamp,updatedAt:stamp,timeZone,range:{startDate,endDate},schedule:structuredClone(state.settings.schedule),tasks,segments:[],basisFingerprint:''};
 }
 export function copyPlan(plan,{id,name,now}){const stamp=new Date(now).toISOString();return {...structuredClone(plan),id,name,revision:0,createdAt:stamp,updatedAt:stamp};}
@@ -69,4 +70,4 @@ export function taskUrgency(task,{now,lastEndAt,completed}){
  if(left<=72)return {level:'yellow',label:`Due in ${Math.ceil(left/24)}d`,reason:'due'};
  return {level:'none',label:`Due in ${Math.ceil(left/24)}d`,reason:null};
 }
-export function planFingerprint(plan,facts){return JSON.stringify([plan,facts.items?.map(i=>[i.key,i.dueAt,i.unlockAt,i.manualStartDay,i.fixedStartAt,i.fixedEndAt,i.completed,resolveEstimate(i,facts.state||{}).minutes]).sort((a,b)=>a[0].localeCompare(b[0])),facts.completed,facts.state?.singleSessions,facts.loadedRange]);}
+export function planFingerprint(plan,facts){return JSON.stringify([plan,facts.items?.map(i=>[i.key,i.dueAt,i.unlockAt,i.manualStartDay,i.fixedStartAt,i.fixedEndAt,i.completed,resolveEstimate(i,facts.state||{}).minutes]).sort((a,b)=>a[0].localeCompare(b[0])),facts.completed,facts.state?.singleSessions,facts.loadedRange,facts.state?.settings?.historyFilter]);}

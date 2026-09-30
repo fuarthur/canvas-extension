@@ -4,6 +4,9 @@ const CACHE_MS = 5 * 60 * 1000;
 
 export function createCanvasLoader({ fetchImpl = fetch, readSelection, now = Date.now } = {}) {
   const cache = new Map();
+  const snapshots = new Map();
+  const pending = new Map();
+  const generations = new Map();
   let active = 0;
   const waiting = [];
   const limitedFetch = async (...args) => {
@@ -15,7 +18,7 @@ export function createCanvasLoader({ fetchImpl = fetch, readSelection, now = Dat
       else active--;
     }
   };
-  return (month, options = {}) => loadCanvasSnapshot({ fetchImpl: limitedFetch, readSelection, now, cache, month, ...options });
+  return (month, options = {}) => loadCanvasSnapshot({ fetchImpl: limitedFetch, readSelection, now, cache, snapshots, pending, generations, month, ...options });
 }
 
 export class CanvasApiError extends Error {
@@ -84,7 +87,7 @@ export async function fetchPages(fetchImpl, url, listKey = null) {
   return rows;
 }
 
-function monthRange(month) {
+function monthRange(month, margin = 6) {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
     throw new CanvasApiError('DATA', 'Invalid calendar month.');
   }
@@ -92,8 +95,8 @@ function monthRange(month) {
   const m = oneBasedMonth - 1;
   const day = date => date.toISOString().slice(0, 10);
   return {
-    startDate: day(new Date(Date.UTC(year, m - 6, 1))),
-    endDate: day(new Date(Date.UTC(year, m + 7, 0)))
+    startDate: day(new Date(Date.UTC(year, m - margin, 1))),
+    endDate: day(new Date(Date.UTC(year, m + margin + 1, 0)))
   };
 }
 
@@ -133,14 +136,57 @@ async function fetchCalendarBatch(fetchImpl, type, codes, range) {
   }
 }
 
-export async function loadCanvasSnapshot({ fetchImpl = fetch, month, readSelection, cache = new Map(), now = Date.now, retryUnavailable = false, range: requestedRange }) {
+export async function loadCanvasSnapshot({ fetchImpl = fetch, month, readSelection, cache = new Map(), snapshots = new Map(), pending = new Map(), generations = new Map(), now = Date.now, force = false, onCached, retryUnavailable = false, range: requestedRange }) {
   const range = requestedRange || monthRange(month);
   if(!validDay(range.startDate)||!validDay(range.endDate)||range.endDate<range.startDate||daysBetween(range.startDate,range.endDate).length>732)throw new CanvasApiError('DATA','Invalid planning date range.');
-  const profile = (await getJson(fetchImpl, `${ORIGIN}/api/v1/users/self/profile`)).body;
+  let profile;
+  try { profile = (await getJson(fetchImpl, `${ORIGIN}/api/v1/users/self/profile`)).body; }
+  catch(error) { if(error.code==='AUTH'){snapshots.clear();cache.clear();pending.clear();generations.clear();} throw error; }
   if (!profile || !Number.isFinite(Number(profile.id))) {
     throw new CanvasApiError('DATA', 'Canvas did not identify the signed-in user.');
   }
   const userId = String(profile.id);
+  let savedSelection;
+  try { savedSelection = await readSelection?.(profile.id); }
+  catch(error) { error.snapshot = {profile,contexts:[],selectedCalendars:[],unavailableCalendars:[],events:[],assignments:[],range:null,warnings:[]}; throw error; }
+  const selectionKey = JSON.stringify(Array.isArray(savedSelection) ? [...new Set(savedSelection)].sort() : null);
+  const key = JSON.stringify([userId, selectionKey, range.startDate, range.endDate]);
+  const bypass = force || retryUnavailable;
+  if (!bypass) {
+    const coverage = requestedRange || monthRange(month, 0);
+    const reusable = [...snapshots.values()].reverse().find(entry => entry.userId === userId && entry.selectionKey === selectionKey && entry.snapshot.range.startDate <= coverage.startDate && entry.snapshot.range.endDate >= coverage.endDate);
+    if (reusable) {
+      const snapshot = { ...reusable.snapshot, profile };
+      if (reusable.expires > now()) return snapshot;
+      await onCached?.(snapshot);
+    }
+    if (pending.has(key)) return pending.get(key);
+  }
+  const generationKey = JSON.stringify([userId, selectionKey]);
+  const generation = Symbol();
+  generations.set(generationKey, generation);
+  const request = fetchSnapshotData({fetchImpl, profile, userId, savedSelection, cache, now, retryUnavailable, range});
+  pending.set(key, request);
+  try {
+    const snapshot = await request;
+    // Earlier responses must not supersede newer requests, even for other ranges.
+    if (pending.get(key) === request && generations.get(generationKey) === generation) {
+      snapshots.delete(key);
+      snapshots.set(key, {userId, selectionKey, snapshot, expires: now() + CACHE_MS});
+      while (snapshots.size > 24) snapshots.delete(snapshots.keys().next().value);
+    }
+    return snapshot;
+  } catch(error) {
+    if(error.code==='AUTH'){for(const [cacheKey,entry] of snapshots)if(entry.userId===userId)snapshots.delete(cacheKey);cache.delete(userId);generations.delete(generationKey);}
+    else error.snapshot ??= {profile,contexts:[],selectedCalendars:Array.isArray(savedSelection)?savedSelection:[],unavailableCalendars:[],events:[],assignments:[],range:null,warnings:[]};
+    throw error;
+  } finally {
+    if(pending.get(key)===request)pending.delete(key);
+    if(generations.get(generationKey)===generation)generations.delete(generationKey);
+  }
+}
+
+async function fetchSnapshotData({fetchImpl, profile, userId, savedSelection, cache, now, retryUnavailable, range}) {
   let cached = cache.get(userId);
   if (!cached || cached.expires <= now() || retryUnavailable) {
     cached = { expires: now() + CACHE_MS, denied: { event: new Set(), assignment: new Set() }, directory: Promise.all([
@@ -151,9 +197,7 @@ export async function loadCanvasSnapshot({ fetchImpl = fetch, month, readSelecti
     cache.set(userId, cached);
     cached.directory.catch(() => { if (cache.get(userId) === cached) cache.delete(userId); });
   }
-  const [[courses, groups, accountCalendars], savedSelection] = await Promise.all([
-    cached.directory, readSelection?.(profile.id)
-  ]);
+  const [courses, groups, accountCalendars] = await cached.directory;
   const contexts = [
     { code: `user_${profile.id}`, name: 'Personal' },
     ...courses.map(course => ({ code: `course_${course.id}`, name: course.name })),

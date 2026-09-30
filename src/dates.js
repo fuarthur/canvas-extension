@@ -70,14 +70,19 @@ export function daysBetween(startDate,endDate){
 }
 
 const zonedFormatters=new Map();
+const zonedInstants=new Map();
 export function zonedDateTime(day,time,timeZone,{disambiguation='earlier'}={}){
  if(!validDay(day)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(time||''))return null;
+ const cacheKey=JSON.stringify([day,time,timeZone,disambiguation]);if(zonedInstants.has(cacheKey))return zonedInstants.get(cacheKey);
  let formatter;try{formatter=zonedFormatters.get(timeZone);if(!formatter){formatter=new Intl.DateTimeFormat('en-US',{timeZone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});zonedFormatters.set(timeZone,formatter);}}catch{return null;}
  const local=ms=>Object.fromEntries(formatter.formatToParts(new Date(ms)).filter(p=>p.type!=='literal').map(p=>[p.type,p.value]));
  const target=Date.parse(`${day}T${time}:00Z`);const offsets=new Set();
  for(let h=-48;h<=48;h+=6){const ms=target+h*3600000;const p=local(ms);offsets.add(Date.UTC(Number(p.year),Number(p.month)-1,Number(p.day),Number(p.hour),Number(p.minute),Number(p.second))-ms);}
  const candidates=[...offsets].map(offset=>target-offset).filter(ms=>{const p=local(ms);return `${p.year}-${p.month}-${p.day}`===day&&`${p.hour}:${p.minute}`===time;}).sort((a,b)=>a-b);
- return candidates.length?new Date(disambiguation==='later'?candidates.at(-1):candidates[0]).toISOString():null;
+ const result=candidates.length?new Date(disambiguation==='later'?candidates.at(-1):candidates[0]).toISOString():null;
+ // A generation validates many candidate schedules with the same local windows.
+ // These immutable conversions depend on the zone and DST interpretation only.
+ if(zonedInstants.size>=10000)zonedInstants.clear();zonedInstants.set(cacheKey,result);return result;
 }
 
 const dayStarts=new Map();

@@ -177,7 +177,7 @@ test('loader reuses directory and denied contexts but refreshes completion and c
   await loader('2026-09');
   calls.length = 0;
   submitted = true;
-  const refreshed = await loader('2026-09');
+  const refreshed = await loader('2026-09', { force: true });
   assert.equal(calls.filter(url => url.pathname === '/api/v1/courses').length, 0);
   assert.equal(calls.filter(url => url.pathname.endsWith('/profile')).length, 1);
   assert.equal(calls.filter(url => url.pathname === '/api/v1/calendar_events').length, 2);
@@ -216,4 +216,94 @@ test('explicit planner ranges are honored before requests and invalid dates are 
 test('calendar transport failures retain verified profile metadata for local archive recovery',async()=>{
  const fake=async url=>{const path=new URL(url).pathname;if(path.endsWith('/profile'))return json(fixture.profile);if(path.endsWith('/calendar_events'))return new Response('',{status:500});return json([]);};
  await assert.rejects(()=>loadCanvasSnapshot({fetchImpl:fake,month:'2026-10',readSelection:async()=>['user_77']}),error=>{assert.equal(error.snapshot?.profile.id,77);assert.deepEqual(error.snapshot.events,[]);return true;});
+});
+
+test('reopening and nearby months reuse complete snapshots after checking the current account', async () => {
+  const calls=[];const base=calendarFetch(()=>200);
+  const loader=canvasApi.createCanvasLoader({fetchImpl:async url=>{calls.push(new URL(url).pathname);return base(url);}});
+  const first=await loader('2026-09');calls.length=0;
+  const reopened=await loader('2026-10');
+  assert.deepEqual(reopened.assignments,first.assignments);
+  assert.deepEqual(calls,['/api/v1/users/self/profile']);
+});
+
+test('expired snapshots are displayed before slow network updates finish', async () => {
+  let now=0,release;const base=calendarFetch(()=>200);let slow=false;
+  const loader=canvasApi.createCanvasLoader({now:()=>now,fetchImpl:async url=>{if(slow&&new URL(url).pathname==='/api/v1/calendar_events')await new Promise(resolve=>{release=resolve;slow=false;});return base(url);}});
+  const first=await loader('2026-09');now=300001;slow=true;
+  let cached;const refreshing=loader('2026-09',{onCached:value=>{cached=value;}});
+  for(let i=0;i<20&&!release;i++)await new Promise(resolve=>setTimeout(resolve,0));
+  assert.ok(release,'background request should start');
+  assert.deepEqual(cached?.assignments,first.assignments);
+  release();await refreshing;
+});
+
+test('calendar selection changes bypass cached snapshots and switching accounts never displays another account cache', async () => {
+  let id=77,selection=['course_1'];const calls=[];const base=calendarFetch(()=>200);
+  const loader=canvasApi.createCanvasLoader({readSelection:async()=>selection,fetchImpl:async url=>{calls.push(new URL(url));if(new URL(url).pathname.endsWith('/profile'))return json({...fixture.profile,id});return base(url);}});
+  await loader('2026-09');selection=['user_77'];calls.length=0;
+  const changed=await loader('2026-09');assert.deepEqual(changed.assignments,[]);
+  assert.equal(calls.filter(url=>url.pathname==='/api/v1/calendar_events').length,2);
+  id=88;selection=null;let shown=false;
+  const other=await loader('2026-09',{onCached:()=>{shown=true;}});
+  assert.equal(other.profile.id,88);assert.equal(shown,false);
+});
+
+test('explicit refresh bypasses snapshot cache and failed updates preserve last successful data', async () => {
+  let failed=false;const base=calendarFetch(()=>200);
+  const loader=canvasApi.createCanvasLoader({fetchImpl:async url=>failed&&new URL(url).pathname==='/api/v1/calendar_events'?new Response('',{status:500}):base(url)});
+  const first=await loader('2026-09');failed=true;
+  await assert.rejects(loader('2026-09',{force:true}));
+  assert.deepEqual((await loader('2026-09')).assignments,first.assignments);
+});
+
+test('simultaneous opens share calendar and assignment requests', async () => {
+  const calls=[];const base=calendarFetch(()=>200);
+  const loader=canvasApi.createCanvasLoader({fetchImpl:async url=>{calls.push(new URL(url).pathname);return base(url);}});
+  const results=await Promise.all([loader('2026-09'),loader('2026-09')]);
+  assert.deepEqual(results[0].assignments,results[1].assignments);
+  assert.equal(calls.filter(path=>path==='/api/v1/calendar_events').length,2);
+});
+
+test('explicit range expansion fetches missing dates and reuses that larger range on reopen',async()=>{
+ const calls=[];const base=calendarFetch(()=>200);const loader=canvasApi.createCanvasLoader({fetchImpl:async url=>{calls.push(new URL(url));return base(url);}});
+ await loader('2026-09');const range={startDate:'2026-01-01',endDate:'2027-05-31'};
+ const expanded=await loader('2026-09',{range});assert.deepEqual(expanded.range,range);calls.length=0;
+ const reopened=await loader('2026-09',{range});assert.deepEqual(reopened.range,range);assert.equal(calls.length,1);
+});
+
+test('sign-out invalidates cached data and requires a new load after sign-in',async()=>{
+ let signedIn=true;const calls=[];const base=calendarFetch(()=>200);const loader=canvasApi.createCanvasLoader({fetchImpl:async url=>{calls.push(new URL(url));return !signedIn?new Response('',{status:401}):base(url);}});
+ await loader('2026-09');signedIn=false;let shown=false;
+ await assert.rejects(loader('2026-09',{onCached:()=>{shown=true;}}),error=>error.code==='AUTH');assert.equal(shown,false);
+ signedIn=true;calls.length=0;await loader('2026-09');assert.equal(calls.filter(url=>url.pathname==='/api/v1/calendar_events').length,2);
+});
+
+test('a delayed load cannot replace the results of a newer manual refresh in cache',async()=>{
+ let release,slow=true;const base=calendarFetch(()=>200);
+ const loader=canvasApi.createCanvasLoader({fetchImpl:async url=>{
+   if(slow&&new URL(url).pathname==='/api/v1/calendar_events'&&new URL(url).searchParams.get('type')==='event'){
+     slow=false;await new Promise(resolve=>{release=resolve;});return json([{...fixture.event,title:'Old result'}]);
+   }
+   return base(url);
+ }});
+ const delayed=loader('2026-09');for(let i=0;i<20&&!release;i++)await new Promise(resolve=>setTimeout(resolve,0));assert.ok(release);
+ const latest=await loader('2026-09',{force:true});release();await delayed;
+ assert.equal((await loader('2026-09')).events[0].title,latest.events[0].title);
+});
+
+test('an older expanded-range response cannot supersede a newer refresh for the same month',async()=>{
+ let release,slow=true;const base=calendarFetch(()=>200);
+ const loader=canvasApi.createCanvasLoader({fetchImpl:async url=>{
+  if(slow&&new URL(url).pathname==='/api/v1/calendar_events'&&new URL(url).searchParams.get('type')==='event'){slow=false;await new Promise(resolve=>{release=resolve;});return json([{...fixture.event,title:'OLD'}]);}
+  return base(url);
+ }});
+ const delayed=loader('2026-09',{range:{startDate:'2026-01-01',endDate:'2027-12-31'}});for(let i=0;i<20&&!release;i++)await new Promise(resolve=>setTimeout(resolve,0));assert.ok(release);
+ const latest=await loader('2026-09',{force:true});release();await delayed;
+ assert.equal((await loader('2026-09')).events[0].title,latest.events[0].title);
+});
+
+test('selection storage failure retains the verified account identity for recovery',async()=>{
+ const loader=canvasApi.createCanvasLoader({fetchImpl:calendarFetch(()=>200),readSelection:async()=>{throw new Error('Storage unavailable');}});
+ await assert.rejects(loader('2026-09'),error=>error.snapshot?.profile.id===77);
 });

@@ -1,13 +1,14 @@
 import {dateKey,zonedDateTime,startOfLocalDay} from './dates.js';import {buildAvailability} from './availability.js';import {resolvePlanTasks} from './plans.js';import {newId} from './ui.js';
+import {isHistoricalTask} from './tasks.js';
 export function taskBounds(task,plan,now){
  const start=startOfLocalDay(plan.range.startDate,plan.timeZone);const manual=task.manualStartDay?startOfLocalDay(task.manualStartDay,plan.timeZone):null;
  return {start:Math.ceil(Math.max(Date.parse(now),Date.parse(start),task.unlockAt?Date.parse(task.unlockAt):-Infinity,manual?Date.parse(manual):-Infinity)/60000)*60000,end:Math.floor(Date.parse(task.dueAt)/60000)*60000};
 }
 export function fixedFacts(plan,items){return [...new Map([...Object.values(plan.tasks).filter(t=>t.type==='event'),...items.filter(i=>i.type==='event')].map(i=>[i.key,i])).values()];}
-export function validatePlan(plan,{items=[],completed={},now,loadedRange}){
+export function validatePlan(plan,{items=[],completed={},now,loadedRange,state,historyFilter}){
  const issues=[];const resolved=resolvePlanTasks(plan,{items,completed});const current=new Map(items.map(i=>[i.key,i]));const add=(code,message,extra={})=>issues.push({code,message,...extra});
  if(!loadedRange||loadedRange.startDate>plan.range.startDate||loadedRange.endDate<plan.range.endDate)add('RANGE','This plan extends beyond loaded calendar data.');
- for(const item of items)if(item.type==='assignment'&&!item.completed&&!completed[item.key]&&item.endDay<=plan.range.endDate&&!plan.tasks[item.key])add('MISSING_TASK','A current deadline task is missing from this plan; include newly loaded tasks.',{itemKey:item.key});
+ for(const item of items)if(item.type==='assignment'&&!item.completed&&!completed[item.key]&&!isHistoricalTask(item,state||{settings:{historyFilter}},{now,timeZone:plan.timeZone})&&item.endDay<=plan.range.endDate&&!plan.tasks[item.key])add('MISSING_TASK','A current deadline task is missing from this plan; include newly loaded tasks.',{itemKey:item.key});
  const ids=new Set();for(const segment of plan.segments){if(ids.has(segment.id))add('DUPLICATE_ID','Work block IDs must be unique.',{segmentId:segment.id});ids.add(segment.id);}
  for(const key of resolved.unknownKeys)add('UNKNOWN','Task is not currently loaded; its deadline cannot be verified.',{itemKey:key});
  for(const change of resolved.changes)add('STALE','Task timing changed; update the plan task data before generating.',{itemKey:change.itemKey});
