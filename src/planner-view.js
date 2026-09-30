@@ -71,5 +71,5 @@ export function createPlannerController(options){
    }for(const event of Object.values(draft.tasks).filter(t=>t.type==='event'&&t.startDay<=day&&t.endDay>=day))group.append(el('p',resolved.tasks[event.key]?.completed?'hint completed':'hint',`${event.title} · Fixed activity`));if(!blocks.length)group.append(el('p','hint','Drop a task here or use Arrange in the task list.'));panel.append(group);
   });return panel;
  }
- const api={render(){draw();return root;},setData(next){data={...data,...next};for(const [id,p]of Object.entries(data.state.plans))if(!archives[id]||p.revision>archives[id].revision)archives[id]=p;draw();},requestLeave,destroy(){generation++;options.schedulerClient?.destroy();destroyed=true;prompt?.resolve?.(false);prompt=null;root.remove();}};return api;
+ const api={render(){draw();return root;},setData(next){data={...data,...next};const incoming={...data.state.plans};if(draft&&draft.revision>0&&(!incoming[draft.id]||incoming[draft.id].revision>draft.revision)){if(dirty){conflict=true;notice='This saved plan changed in another page. Reload it or save a copy.';}else draft=incoming[draft.id]?structuredClone(incoming[draft.id]):null;}archives=incoming;draw();},requestLeave,destroy(){generation++;options.schedulerClient?.destroy();destroyed=true;prompt?.resolve?.(false);prompt=null;root.remove();}};return api;
 }

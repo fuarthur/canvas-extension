@@ -206,3 +206,14 @@ test('explicit permission retry rechecks denied calendars before cache expiry', 
   const snapshot = await loader('2026-09', { retryUnavailable: true });
   assert.deepEqual(snapshot.warnings, []);
 });
+
+test('explicit planner ranges are honored before requests and invalid dates are rejected',async()=>{
+ const calls=[];const fake=async url=>{calls.push(String(url));const parsed=new URL(url);if(parsed.pathname.endsWith('/profile'))return json(fixture.profile);return json([]);};
+ const {createCanvasLoader}=await import('../src/canvas-api.js');const loader=createCanvasLoader({fetchImpl:fake,readSelection:async()=>['user_77']});const snapshot=await loader('2026-10',{range:{startDate:'2026-10-01',endDate:'2027-02-01'}});assert.deepEqual(snapshot.range,{startDate:'2026-10-01',endDate:'2027-02-01'});assert.ok(calls.filter(u=>u.includes('/calendar_events')).every(u=>new URL(u).searchParams.get('end_date')==='2027-02-01'));
+ await assert.rejects(()=>loader('2026-10',{range:{startDate:'2026-02-30',endDate:'2026-03-01'}}));
+});
+
+test('calendar transport failures retain verified profile metadata for local archive recovery',async()=>{
+ const fake=async url=>{const path=new URL(url).pathname;if(path.endsWith('/profile'))return json(fixture.profile);if(path.endsWith('/calendar_events'))return new Response('',{status:500});return json([]);};
+ await assert.rejects(()=>loadCanvasSnapshot({fetchImpl:fake,month:'2026-10',readSelection:async()=>['user_77']}),error=>{assert.equal(error.snapshot?.profile.id,77);assert.deepEqual(error.snapshot.events,[]);return true;});
+});

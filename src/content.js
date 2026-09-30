@@ -12,6 +12,7 @@ if (location.pathname.startsWith('/calendar')) {
     host,
     loadSnapshot: createCanvasLoader({ readSelection: async userId => (await storeFactory(userId).load()).selectedCalendars ?? nativeCalendarSelection(document) }),
     storeFactory,
+    subscribeStorage:({hostname,userId},listener)=>{const prefix=`canvas-planner:${hostname}:${userId}:`;const handler=(changes,area)=>{if(area==='local'&&Object.keys(changes).some(key=>key.startsWith(prefix)))listener(changes);};chrome.storage.onChanged.addListener(handler);return()=>chrome.storage.onChanged.removeListener(handler);},
     schedulerClientFactory:()=>createSchedulerClient({connect:options=>chrome.runtime.connect(options)}),
     planClientFactory:userId=>createPlanClient({userId,sendMessage:message=>chrome.runtime.sendMessage(message)}),
     initialMonth: monthFromCalendarHash(location.hash, new Date())

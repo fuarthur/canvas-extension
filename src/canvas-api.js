@@ -1,3 +1,4 @@
+import {validDay,daysBetween} from './dates.js';
 const ORIGIN = 'https://canvas.illinois.edu';
 const CACHE_MS = 5 * 60 * 1000;
 
@@ -132,8 +133,9 @@ async function fetchCalendarBatch(fetchImpl, type, codes, range) {
   }
 }
 
-export async function loadCanvasSnapshot({ fetchImpl = fetch, month, readSelection, cache = new Map(), now = Date.now, retryUnavailable = false }) {
-  const range = monthRange(month);
+export async function loadCanvasSnapshot({ fetchImpl = fetch, month, readSelection, cache = new Map(), now = Date.now, retryUnavailable = false, range: requestedRange }) {
+  const range = requestedRange || monthRange(month);
+  if(!validDay(range.startDate)||!validDay(range.endDate)||range.endDate<range.startDate||daysBetween(range.startDate,range.endDate).length>732)throw new CanvasApiError('DATA','Invalid planning date range.');
   const profile = (await getJson(fetchImpl, `${ORIGIN}/api/v1/users/self/profile`)).body;
   if (!profile || !Number.isFinite(Number(profile.id))) {
     throw new CanvasApiError('DATA', 'Canvas did not identify the signed-in user.');
@@ -172,7 +174,11 @@ export async function loadCanvasSnapshot({ fetchImpl = fetch, month, readSelecti
   }
   const events = [];
   const assignments = [];
-  const results = await Promise.all(requests);
+  let results;
+  try {results=await Promise.all(requests);}catch(error){
+    if(error.code!=='AUTH')error.snapshot={profile,contexts:uniqueContexts,selectedCalendars,unavailableCalendars:[],events:[],assignments:[],range:null,warnings:[]};
+    throw error;
+  }
   for (const result of results) for (const code of result.denied) cached.denied[result.type].add(code);
   const denied = new Set(selectedCalendars.filter(code => cached.denied.event.has(code) || cached.denied.assignment.has(code)));
   if (selectedCalendars.length && !results.some(result => result.readable)) {

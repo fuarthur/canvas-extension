@@ -70,13 +70,16 @@ function shortContext(name) {
   return courseCode ? courseCode[0] : String(name || 'Personal').slice(0, 18);
 }
 
-export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFactory, schedulerClientFactory, initialMonth, now = () => new Date() }) {
+export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFactory, schedulerClientFactory, subscribeStorage, planningStoreFactory, initialMonth, now = () => new Date() }) {
   const document = host.ownerDocument;
   const root = host.shadowRoot || host.attachShadow({ mode: 'open' });
   let open = false;
   let month = initialMonth;
   let snapshot = null;
   let store = null;
+  let planningStore = null;
+  let unsubscribeStorage = null;
+  let localVersion = 0;
   let userState = { starts: {}, completed: {} };
   let planningState = {settings:defaultSettings(),estimates:{},singleSessions:{},plans:{},warnings:[]};
   let selectedDay = null;
@@ -104,13 +107,14 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
     const button = el('button', className, text);
     button.type = 'button';
     button.setAttribute('aria-label', label);
-    button.addEventListener('click', handler);
+    button.addEventListener('click', event=>{try{Promise.resolve(handler(event)).catch(cause=>{notice=cause.message||'This change could not be saved.';render();});}catch(cause){notice=cause.message;render();}});
     return button;
   }
 
   async function close(force=false) {
     if(force!==true&&planController&&!await planController.requestLeave())return;
     planController?.destroy();planController=null;controllerUserId=null;
+    unsubscribeStorage?.();unsubscribeStorage=null;localVersion++;
     open = false;
     requestId++;
     loading = false;
@@ -123,46 +127,45 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
     if (event.key === 'Escape') close();
   }
 
-  async function load(force = false, options = {}) {
-    if (!force && snapshot && monthInRange(month, snapshot.range)) {
-      render();
-      return;
-    }
-    const currentRequest = ++requestId;
-    loading = true;
-    error = null;
-    render();
-    try {
-      const nextSnapshot = await loadSnapshot(month, options);
-      if (!open || currentRequest !== requestId) return;
-      if(planController&&String(controllerUserId)!==String(nextSnapshot.profile.id)){planController.destroy();planController=null;controllerUserId=null;}
-      snapshot = nextSnapshot;
-      store = storeFactory(nextSnapshot.profile.id);
-      userState = await store.load();
-      planningState = store.loadPlanningState ? await store.loadPlanningState() : {settings:defaultSettings(),estimates:{},singleSessions:{},plans:{},warnings:[]};
-      if (!open || currentRequest !== requestId) return;
-      draftSelection = new Set(snapshot.selectedCalendars || userState.selectedCalendars || snapshot.contexts.map(context => context.code));
-      loading = false;
-      render();
-    } catch (cause) {
-      if (!open || currentRequest !== requestId) return;
-      loading = false;
-      error = cause instanceof Error ? cause.message : 'Could not load Canvas calendar.';
-      snapshot = cause?.snapshot || null;
-      if (snapshot) {
-        store = storeFactory(snapshot.profile.id);
-        userState = await store.load();
-        if (!open || currentRequest !== requestId) return;
-        draftSelection = new Set(snapshot.selectedCalendars);
-      }
+  async function installSnapshot(nextSnapshot,currentRequest){
+    const nextStore=storeFactory(nextSnapshot.profile.id);const nextPlanningStore=planningStoreFactory?.(nextSnapshot.profile.id)||nextStore;
+    const nextUserState=await nextStore.load();
+    const nextPlanningState=nextPlanningStore.loadPlanningState?await nextPlanningStore.loadPlanningState():{settings:defaultSettings(),estimates:{},singleSessions:{},plans:{},warnings:[]};
+    if(!open||currentRequest!==requestId)return false;
+    if(planController&&String(controllerUserId)!==String(nextSnapshot.profile.id)){planController.destroy();planController=null;controllerUserId=null;selectedKey=null;selectedDay=null;}
+    unsubscribeStorage?.();unsubscribeStorage=null;localVersion++;
+    snapshot=nextSnapshot;store=nextStore;planningStore=nextPlanningStore;userState=nextUserState;planningState=nextPlanningState;
+    draftSelection=new Set(snapshot.selectedCalendars||userState.selectedCalendars||snapshot.contexts.map(c=>c.code));
+    if(subscribeStorage){const scope={hostname:document.location.hostname,userId:snapshot.profile.id};unsubscribeStorage=subscribeStorage(scope,changes=>{if(!open||String(snapshot?.profile.id)!==String(scope.userId))return;const calendarKey=`canvas-planner:${scope.hostname}:${scope.userId}:calendars`;if(changes?.[calendarKey])load(true);else refreshLocal().catch(cause=>{notice=cause.message;render();});});}
+    return true;
+  }
+  async function load(force=false,options={}){
+    if(!force&&snapshot&&monthInRange(month,snapshot.range)){render();return;}
+    const currentRequest=++requestId;loading=true;error=null;render();let nextSnapshot=null;
+    try{
+      nextSnapshot=await loadSnapshot(month,options);
+      if(!await installSnapshot(nextSnapshot,currentRequest))return;
+      loading=false;render();
+    }catch(cause){
+      if(!open||currentRequest!==requestId)return;
+      loading=false;error=cause instanceof Error?cause.message:'Could not load Canvas calendar.';
+      const metadata=cause?.snapshot;
+      if(metadata){try{if(!await installSnapshot(metadata,currentRequest))return;}catch(localCause){snapshot=null;error=`${error} Could not read local planning data: ${localCause.message}`;}}
+      else{snapshot=null;unsubscribeStorage?.();unsubscribeStorage=null;planController?.destroy();planController=null;controllerUserId=null;}
       render();
     }
   }
-
   const combinedState=()=>({...planningState,completed:userState.completed});
   const monthRange=()=>({startDate:`${month}-01`,endDate:addDays(`${shiftMonth(month,1)}-01`,-1)});
-  async function refreshLocal(){userState=await store.load();if(store.loadPlanningState)planningState=await store.loadPlanningState();render();}
-  async function completeItem(key,value){await store.setCompleted(key,value);await refreshLocal();}
+  async function refreshLocal(){const token=++localVersion;const capturedStore=store;const capturedPlanning=planningStore;const nextUser=await capturedStore.load();const nextPlanning=capturedPlanning?.loadPlanningState?await capturedPlanning.loadPlanningState():planningState;if(!open||token!==localVersion||store!==capturedStore)return;userState=nextUser;planningState=nextPlanning;render();}
+  async function mutateLocal(operation){try{await operation();await refreshLocal();return true;}catch(cause){notice=cause.message||'Could not save this change. Try again.';render();return false;}}
+  async function completeItem(key,value){return mutateLocal(()=>store.setCompleted(key,value));}
+  async function ensurePlanRange(range){
+    const userId=snapshot?.profile.id;
+    if(!snapshot?.range||snapshot.range.startDate>range.startDate||snapshot.range.endDate<range.endDate){const requestRange={startDate:snapshot?.range?.startDate<range.startDate?snapshot.range.startDate:range.startDate,endDate:snapshot?.range?.endDate>range.endDate?snapshot.range.endDate:range.endDate};await load(true,{range:requestRange});}
+    if(!open||error||snapshot?.profile.id!==userId)throw new Error(error||'Canvas account changed. Open the planner again.');
+    return {items:normalizeItems(snapshot,userState),state:planningState,completed:userState.completed,loadedRange:snapshot.range};
+  }
   async function navigate(nextMonth) {
     month = nextMonth;
     selectedDay = null;
@@ -197,27 +200,23 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
           return;
         }
         notice = null;
-        await store.setStart(item.key, input.value);
-        userState = await store.load();
-        render();
+        await mutateLocal(()=>store.setStart(item.key,input.value));
       });
       field.append(input);
       panel.append(field);
       panel.append(action('Use Canvas start date', 'Use Canvas date', async () => {
         notice = null;
-        await store.setStart(item.key, null);
-        userState = await store.load();
-        render();
+        await mutateLocal(()=>store.setStart(item.key,null));
       }, 'text-button'));
       if (item.needsStart) panel.append(el('p', 'hint', 'No Canvas open date; choose when you plan to start.'));
     }
     const estimate=resolveEstimate(item,planningState);
     const estimateField=el('label','field','Estimated effort (minutes)');
     const estimateInput=el('input');estimateInput.type='number';estimateInput.min='1';estimateInput.max='1440';estimateInput.value=String(estimate.minutes);estimateInput.setAttribute('aria-label','Estimated effort minutes');
-    estimateInput.addEventListener('change',async()=>{try{await store.setEstimate(item.key,Number(estimateInput.value));await refreshLocal();}catch(cause){notice=cause.message;render();}});
-    estimateField.append(estimateInput);panel.append(estimateField,el('p','hint',estimate.label),action('Use automatic estimate','Use rule / default',async()=>{await store.setEstimate(item.key,null);await refreshLocal();},'text-button'));
+    estimateInput.addEventListener('change',async()=>{try{await planningStore.setEstimate(item.key,Number(estimateInput.value));await refreshLocal();}catch(cause){notice=cause.message;render();}});
+    estimateField.append(estimateInput);panel.append(estimateField,el('p','hint',estimate.label),action('Use automatic estimate','Use rule / default',async()=>{await planningStore.setEstimate(item.key,null);await refreshLocal();},'text-button'));
     if(item.type==='assignment'){
-      const once=el('label','check');const box=el('input');box.type='checkbox';box.checked=Boolean(planningState.singleSessions[item.key]);box.setAttribute('aria-label','Must finish in one session');box.addEventListener('change',async()=>{await store.setSingleSession(item.key,box.checked);await refreshLocal();});once.append(box,document.createTextNode('Must finish in one session'));panel.append(once);
+      const once=el('label','check');const box=el('input');box.type='checkbox';box.checked=Boolean(planningState.singleSessions[item.key]);box.setAttribute('aria-label','Must finish in one session');box.addEventListener('change',async()=>{await mutateLocal(()=>planningStore.setSingleSession(item.key,box.checked));});once.append(box,document.createTextNode('Must finish in one session'));panel.append(once);
     }
     const check = el('label', 'check');
     const checkbox = el('input');
@@ -295,7 +294,7 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
     });
     save.disabled = saving;
     panel.append(save, action('Retry unavailable calendars', 'Retry calendar access', () => load(true, { retryUnavailable: true })));
-    panel.append(renderPlanningSettings({document,state:planningState,contexts:snapshot.contexts,onSave:async settings=>{await store.setSettings(settings);await refreshLocal();}}));
+    panel.append(renderPlanningSettings({document,state:planningState,contexts:snapshot.contexts,onSave:async settings=>{await planningStore.setSettings(settings);await refreshLocal();}}));
     if (notice) panel.append(el('p', 'notice', notice));
     return panel;
   }
@@ -381,7 +380,7 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
     body.setAttribute('role', 'tabpanel');
     if (loading) body.append(el('div', 'status', 'Loading Canvas calendar…'));
     else if (activeTab === 'settings' && snapshot) body.append(settings());
-    else if (error) {
+    else if (error && activeTab!=='planner') {
       const status = el('div', 'status error');
       status.append(el('p', '', error), action('Retry loading', 'Retry', () => load(true, { retryUnavailable: true })));
       body.append(status);
@@ -393,12 +392,12 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
         body.append(message);
       }
       for(const warning of planningState.warnings)body.append(el('p','notice',warning));
-      const pressure=workloadSummary(items,combinedState(),{now:typeof now==='function'?now():now,schedulerClient:schedulerClientFactory?.(snapshot.profile.id),timeZone:snapshot.profile.time_zone,range:monthRange()});
+      const pressure=workloadSummary(items,combinedState(),{now:typeof now==='function'?now():now,timeZone:snapshot.profile.time_zone,range:monthRange()});
       const todaySummary=el('p','today-summary',`Today · ${pressure.today.tasks} remaining · ${pressure.overdue.length} overdue`);body.append(todaySummary);
-      if(activeTab==='workload')body.append(renderWorkloadView({document,items,state:combinedState(),range:monthRange(),now:typeof now==='function'?now():now,schedulerClient:schedulerClientFactory?.(snapshot.profile.id),timeZone:snapshot.profile.time_zone,onOpenItem:key=>{selectedKey=key;render();},onComplete:completeItem}));
+      if(activeTab==='workload')body.append(renderWorkloadView({document,items,state:combinedState(),range:monthRange(),now:typeof now==='function'?now():now,timeZone:snapshot.profile.time_zone,onOpenItem:key=>{selectedKey=key;render();},onComplete:completeItem}));
       else if(activeTab==='planner'){
         const data={items,state:planningState,completed:userState.completed,loadedRange:snapshot.range};
-        if(!planController){controllerUserId=snapshot.profile.id;planController=createPlannerController({document,...data,planClient:planClientFactory?.(snapshot.profile.id)||{save:async()=>({ok:false,message:'Plan storage is unavailable.'}),remove:async()=>({ok:false,message:'Plan storage is unavailable.'})},now,schedulerClient:schedulerClientFactory?.(snapshot.profile.id),timeZone:snapshot.profile.time_zone||Intl.DateTimeFormat().resolvedOptions().timeZone,onOpenItem:key=>{selectedKey=key;render();},onComplete:completeItem,onReloadPlans:()=>store.loadPlanningState()});}
+        if(!planController){controllerUserId=snapshot.profile.id;planController=createPlannerController({document,...data,planClient:planClientFactory?.(snapshot.profile.id)||{save:async()=>({ok:false,message:'Plan storage is unavailable.'}),remove:async()=>({ok:false,message:'Plan storage is unavailable.'})},now,schedulerClient:schedulerClientFactory?.(snapshot.profile.id),timeZone:snapshot.profile.time_zone||Intl.DateTimeFormat().resolvedOptions().timeZone,onOpenItem:key=>{selectedKey=key;render();},onComplete:completeItem,onReloadPlans:()=>planningStore.loadPlanningState(),ensureRange:ensurePlanRange});}
         else planController.setData(data);
         body.append(planController.render());
       }else body.append(calendar(items));
@@ -406,6 +405,7 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
       const selected = items.find(item => item.key === selectedKey);
       if (selected) shell.append(detail(selected));
     }
+    if(notice&&activeTab!=='settings'&&!selectedKey)body.append(el('p','notice',notice));
     shell.append(body);
     backdrop.append(shell);
     const focused=root.activeElement;const focusId=focused?.dataset?.controlId||focused?.getAttribute('aria-label');const selection=focused?.selectionStart;
