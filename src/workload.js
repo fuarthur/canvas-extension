@@ -13,5 +13,5 @@ export function workloadSeries(items,state,range){
 export function workloadSummary(items,state,{now,timeZone,range}){
  const today=dateKey(now,timeZone);const series=workloadSeries(items,state,range);
  const overdue=[...new Map(items.map(item=>[item.key,item])).values()].filter(item=>!item.completed&&!state.completed?.[item.key]&&new Date(item.dueAt||item.fixedEndAt||item.endAt).getTime()<new Date(now).getTime());
- return {today:workloadSeries(items,state,{startDate:today,endDate:today})[0],overdue,series,totalTasks:series.reduce((sum,p)=>sum+p.tasks,0),totalMinutes:series.reduce((sum,p)=>sum+p.minutes,0),peakDay:[...series].sort((a,b)=>b.tasks-a.tasks)[0]?.day||null};
+ return {today:workloadSeries(items,state,{startDate:today,endDate:today})[0],overdue,series,totalTasks:series.reduce((sum,p)=>sum+p.tasks,0),totalMinutes:series.reduce((sum,p)=>sum+p.minutes,0),peakDay:series.some(p=>p.tasks)?[...series].sort((a,b)=>b.tasks-a.tasks)[0].day:null};
 }

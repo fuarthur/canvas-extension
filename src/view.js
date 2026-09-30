@@ -151,7 +151,7 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
       loading=false;error=cause instanceof Error?cause.message:'Could not load Canvas calendar.';
       const metadata=cause?.snapshot;
       if(metadata){try{if(!await installSnapshot(metadata,currentRequest))return;}catch(localCause){snapshot=null;error=`${error} Could not read local planning data: ${localCause.message}`;}}
-      else{snapshot=null;unsubscribeStorage?.();unsubscribeStorage=null;planController?.destroy();planController=null;controllerUserId=null;}
+      else if(cause?.code==='AUTH'||!snapshot){snapshot=null;unsubscribeStorage?.();unsubscribeStorage=null;planController?.destroy();planController=null;controllerUserId=null;}
       render();
     }
   }
@@ -380,11 +380,12 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
     body.setAttribute('role', 'tabpanel');
     if (loading) body.append(el('div', 'status', 'Loading Canvas calendar…'));
     else if (activeTab === 'settings' && snapshot) body.append(settings());
-    else if (error && activeTab!=='planner') {
+    else if (error && (activeTab!=='planner'||!snapshot)) {
       const status = el('div', 'status error');
       status.append(el('p', '', error), action('Retry loading', 'Retry', () => load(true, { retryUnavailable: true })));
       body.append(status);
     } else if (snapshot) {
+      if(error){const status=el('div','status error');status.append(el('p','',`${error} Showing your last loaded data; refresh to verify current deadlines.`),action('Retry loading','Retry',()=>load(true,{retryUnavailable:true})));body.append(status);}
       const items = normalizeItems(snapshot, userState);
       for (const warning of snapshot.warnings || []) {
         const message = el('p', 'notice', warning);

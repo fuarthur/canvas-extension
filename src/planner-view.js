@@ -6,9 +6,23 @@ export function createPlannerController(options){
  const now=()=>new Date(typeof options.now==='function'?options.now():options.now);const today=()=>dateKey(now(),options.timeZone);
  const facts=()=>({items:data.items,completed:data.completed,now:now().toISOString(),loadedRange:data.loadedRange,state:data.state});
  const mark=value=>{dirty=value;onDirtyChange?.(value);};
- const change=operation=>{try{draft=updatePlan(draft,operation);mark(true);notice='';draw();}catch(error){notice=error.message;draw();}};
+ const change=operation=>{try{draft=updatePlan(draft,operation);if(operation.type==='configure')includeCurrentTasks();mark(true);notice='';draw();}catch(error){notice=error.message;draw();}};
  const finishPrompt=value=>{const resolve=prompt?.resolve;prompt=null;draw();resolve?.(value);};
- async function save(){if(!draft||saving)return false;saving=true;draw();let result;try{result=await planClient.save(draft,draft.revision);}catch(error){result={ok:false,message:error.message};}if(destroyed)return false;saving=false;if(result?.ok){draft=structuredClone(result.plan);archives[draft.id]=result.plan;data.state.plans[draft.id]=result.plan;mark(false);notice='Plan saved.';conflict=false;}else{notice=result?.message||'Could not save your plan.';conflict=result?.code==='CONFLICT';}draw();return Boolean(result?.ok);}
+ async function save(){
+  if(!draft||saving)return false;const sent=structuredClone(draft);saving=true;draw();let result;
+  try{result=await planClient.save(sent,sent.revision);}catch(error){result={ok:false,message:error.message};}
+  if(destroyed)return false;saving=false;let clean=false;
+  if(result?.ok){archives[result.plan.id]=result.plan;data.state.plans[result.plan.id]=result.plan;
+   if(draft?.id===sent.id){clean=JSON.stringify(draft)===JSON.stringify(sent);draft=clean?structuredClone(result.plan):{...draft,revision:result.plan.revision,updatedAt:result.plan.updatedAt};mark(!clean);conflict=false;}
+   notice=clean?'Plan saved.':'Earlier changes saved. Your newer edits still need saving.';
+  }else{notice=result?.message||'Could not save your plan.';conflict=result?.code==='CONFLICT';}draw();return Boolean(result?.ok&&clean);
+ }
+ function includeCurrentTasks(){
+  if(!draft)return;for(const item of data.items){const eligible=item.type==='assignment'?item.endDay<=draft.range.endDate:item.startDay<=draft.range.endDate&&item.endDay>=draft.range.startDate;
+   if(eligible&&!item.completed&&!data.completed[item.key]&&!draft.tasks[item.key]){draft=updatePlan(draft,{type:'addTask',task:snapshotTask(item,{...data.state,completed:data.completed})});mark(true);}
+  }
+ }
+
  function discard(){draft=draft&&archives[draft.id]?structuredClone(archives[draft.id]):null;mark(false);editing=null;}
  function requestLeave(){if(generating)cancelGeneration();if(!dirty)return Promise.resolve(true);if(prompt?.kind==='leave')return prompt.promise;let resolve;const promise=new Promise(r=>{resolve=r;});prompt={kind:'leave',resolve,promise};draw();return promise;}
  async function newPlan(){if(!await requestLeave())return;const day=today();draft=createPlan({id:newId('plan'),name:'New plan',items:data.items,state:{...data.state,completed:data.completed},startDate:day,endDate:addDays(day,data.state.settings.schedule.horizonDays-1),timeZone:options.timeZone,now:now()});mark(true);notice='';editing=null;draw();}
@@ -17,8 +31,9 @@ export function createPlannerController(options){
  function cancelGeneration(){generation++;options.schedulerClient?.cancel();generating=false;progress='';draw();}
  async function generate(){
   if(!draft||generating)return;
-  const changes=resolvePlanTasks(draft,facts()).changes;if(changes.length){notice='Task data changed. Update plan task data before generating.';draw();return;}
   if(options.ensureRange){try{const fresh=await options.ensureRange(draft.range);if(fresh)data={...data,...fresh};}catch(error){notice=error.message;draw();return;}}
+  if(destroyed||!draft)return;includeCurrentTasks();
+  const changes=resolvePlanTasks(draft,facts()).changes;if(changes.length){notice='Task data changed. Update plan task data before generating.';draw();return;}
   const version=++generation;const fingerprint=planFingerprint(draft,facts());const input={plan:structuredClone(draft),items:structuredClone(data.items),completed:{...data.completed},now:now().toISOString(),loadedRange:data.loadedRange};
   generating=true;preview=null;progress='Checking deadlines and working windows…';draw();let result;
   try{result=await options.schedulerClient.run(input,{onProgress:p=>{if(generation===version){progress=p.phase==='balancing'?`Balancing · peak ${formatMinutes(p.peakMinutes)}`:`Arranging ${p.day||''}`;const status=root.querySelector('.generation-progress');if(status)status.textContent=progress;}}});}catch(error){result={status:'error',message:error.message};}
@@ -31,7 +46,7 @@ export function createPlannerController(options){
   panel.append(renderLineChart({document,series:[{id:'generated',name:'Generated remaining work',color:'#258c83',points:planSeries({...draft,segments:preview.segments}, {...facts(),mode:'remaining'})}],metric:'minutes'}));
   if(preview.validation?.issues.every(i=>i.code==='OVERDUE'))panel.append(button('Accept generated plan',()=>{if(planFingerprint(draft,facts())!==previewFingerprint){preview=null;notice='This plan changed. Generate again.';draw();return;}const checked=validatePlan({...draft,segments:preview.segments},facts());if(checked.issues.some(i=>i.code!=='OVERDUE')){notice='The preview no longer fits current time or task data. Generate again.';preview=null;draw();return;}draft={...draft,segments:structuredClone(preview.segments)};mark(true);preview=null;notice='Generated work accepted into the draft. Save to keep it.';draw();}));panel.append(button('Discard generated preview',()=>{preview=null;draw();},'text-button','Discard preview'));return panel;}
  function draw(){
-  if(destroyed)return;const focused=document.activeElement?.shadowRoot?.activeElement||document.activeElement;const focusId=focused?.dataset?.controlId;const cursor=focused?.selectionStart;root.replaceChildren();
+  if(destroyed)return;const disclosures=new Map([...root.querySelectorAll('details')].map(n=>[n.querySelector('summary')?.textContent,n.open]));const focused=document.activeElement?.shadowRoot?.activeElement||document.activeElement;const focusId=focused?.dataset?.controlId;const cursor=focused?.selectionStart;root.replaceChildren();
   const toolbar=el('div','plan-toolbar');toolbar.append(button('New plan',newPlan));if(Object.keys(archives).length){toolbar.append(select('Saved plans',[['','Choose saved plan'],...Object.values(archives).map(p=>[p.id,p.name])],draft?.id||'',async id=>{if(!id)return;if(await requestLeave()){draft=structuredClone(archives[id]);editing=null;notice='';draw();}}));}root.append(toolbar);
   if(draft){toolbar.append(button('Save plan',save,'control',saving?'Saving…':'Save'),button('Copy plan',()=>{draft=copyPlan(draft,{id:newId('plan'),name:`${draft.name.slice(0,110)} copy`,now:now()});mark(true);editing=null;draw();}),button('Delete plan',()=>{prompt={kind:'delete'};draw();},'text-button','Delete'));toolbar.querySelector('[aria-label="Save plan"]').disabled=saving;
    if(options.schedulerClient){toolbar.append(button('Generate balanced plan',generate,'control',generating?'Generating…':'Generate balanced plan'));toolbar.querySelector('[aria-label="Generate balanced plan"]').disabled=generating;if(generating)toolbar.append(button('Cancel generation',cancelGeneration,'text-button'));}
@@ -51,6 +66,7 @@ export function createPlannerController(options){
    if(prompt.kind==='leave'){dialog.append(el('h3','','Save your plan before leaving?'),button('Save draft and continue',async()=>{if(await save())finishPrompt(true);}),button('Discard draft changes',()=>{discard();finishPrompt(true);},'text-button'),button('Return to editing',()=>finishPrompt(false),'text-button'));}
    else{dialog.append(el('h3','',`Delete “${draft?.name}”?`),el('p','hint','This removes only this saved plan.'),button('Confirm delete plan',async()=>{if(archives[draft.id]){const result=await planClient.remove(draft.id,draft.revision);if(!result.ok){notice=result.message;prompt=null;draw();return;}delete archives[draft.id];delete data.state.plans[draft.id];compared.delete(draft.id);}draft=Object.values(archives)[0]?structuredClone(Object.values(archives)[0]):null;mark(false);prompt=null;draw();}),button('Cancel delete plan',()=>{prompt=null;draw();},'text-button'));}root.append(dialog);
   }
+  for(const detail of root.querySelectorAll('details')){const label=detail.querySelector('summary')?.textContent;if(disclosures.has(label))detail.open=disclosures.get(label);}
   if(focusId){const target=[...root.querySelectorAll('[data-control-id]')].find(n=>n.dataset.controlId===focusId);target?.focus();if(cursor!=null&&target?.type==='text')target.setSelectionRange(cursor,cursor);}
  }
  function pool(){const panel=el('aside','task-pool');panel.append(el('h3','','Remaining tasks'));const search=input('Search tasks',filters.query);search.addEventListener('input',()=>{filters.query=search.value;draw();});const contexts=new Map();for(const item of data.items)(item.contextCodes||[]).forEach((code,index)=>contexts.set(code,item.contexts[index]||code));

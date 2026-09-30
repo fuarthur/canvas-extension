@@ -28,3 +28,17 @@ test('generated previews are separate from drafts until accepted and stale estim
  const controller=createPlannerController({...s.options,schedulerClient:client});const root=controller.render();s.dom.window.document.querySelector('main').append(root);root.querySelector('[aria-label="New plan"]').click();await settle();root.querySelector('[aria-label="Generate balanced plan"]').click();await until(()=>root.querySelector('[aria-label="Accept generated plan"]'));assert.ok(root.querySelector('[aria-label="Accept generated plan"]'));assert.equal(Object.keys((await s.store.loadPlanningState()).plans).length,0);root.querySelector('[aria-label="Accept generated plan"]').click();assert.match(root.querySelector('[data-plan-day="2026-10-01"]').textContent,/min/);
  delayed=true;root.querySelector('[aria-label="Generate balanced plan"]').click();await until(()=>release);const changed=planningState();changed.estimates['assignment:1']=90;controller.setData({state:changed});release();await settle();assert.equal(root.querySelector('[aria-label="Accept generated plan"]'),null);assert.match(root.textContent,/changed/);controller.destroy();s.dom.window.close();
 });
+
+test('edits made during a save survive and remain dirty until the next save',async()=>{
+ const s=await setup();let resolve;let sent;const client={save:async p=>{sent=structuredClone(p);return new Promise(r=>resolve=r);}};
+ const c=createPlannerController({...s.options,planClient:client});const root=c.render();s.dom.window.document.querySelector('main').append(root);root.querySelector('[aria-label="New plan"]').click();await settle();root.querySelector('[aria-label="Save plan"]').click();
+ const name=root.querySelector('[aria-label="Plan name"]');name.value='Edited during save';name.dispatchEvent(new s.dom.window.Event('change'));resolve({ok:true,plan:{...sent,revision:1}});await settle();assert.equal(root.querySelector('[aria-label="Plan name"]').value,'Edited during save');assert.match(root.textContent,/Unsaved changes/);
+ root.querySelector('[aria-label="Save plan"]').click();assert.equal(sent.revision,1);assert.equal(sent.name,'Edited during save');resolve({ok:true,plan:{...sent,revision:2}});await settle();assert.match(root.textContent,/Saved plan/);c.destroy();s.dom.window.close();
+});
+test('newly loaded tasks within the plan range are included before generation',async()=>{
+ const s=await setup([]);let received;const c=createPlannerController({...s.options,ensureRange:async()=>({items:[task()],loadedRange:s.options.loadedRange}),schedulerClient:{run:async input=>{received=input;return {status:'cancelled'};},cancel(){},destroy(){}}});const root=c.render();s.dom.window.document.querySelector('main').append(root);root.querySelector('[aria-label="New plan"]').click();await settle();root.querySelector('[aria-label="Generate balanced plan"]').click();await settle();assert.ok(received.plan.tasks['assignment:1']);c.destroy();s.dom.window.close();
+});
+
+test('configuration stays open when editing capacities redraws the plan',async()=>{
+ const s=await setup();await s.click('New plan');s.root.querySelector('.plan-configuration').open=true;s.change('Sun capacity minutes',0);assert.equal(s.root.querySelector('.plan-configuration').open,true);s.dom.window.close();
+});

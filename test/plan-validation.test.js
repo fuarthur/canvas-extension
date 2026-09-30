@@ -18,3 +18,8 @@ test('suggestions allow missing unlock from the start but never suggest work aft
  const p=plan();const result=suggestSegment(p,'assignment:1',{day:'2026-10-01',minutes:60},facts());assert.equal(result.segment.startAt,'2026-10-01T14:00:00.000Z');
  const late=suggestSegment(p,'assignment:1',{day:'2026-10-01',minutes:60,startTime:'13:00'},facts(task({dueAt:'2026-10-01T12:00:00-05:00'})));assert.equal(late.segment,null);assert.ok(late.issues.length);
 });
+
+test('duplicate IDs and omitted current deadline tasks cannot pass complete validation',()=>{
+ assert.ok(validatePlan(plan({tasks:{}}),facts()).issues.some(i=>i.code==='MISSING_TASK'));
+ assert.ok(validatePlan(plan({segments:[seg(),seg()]}),facts()).issues.some(i=>i.code==='DUPLICATE_ID'));
+});

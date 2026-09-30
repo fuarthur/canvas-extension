@@ -33,3 +33,27 @@ test('tiny preemptive examples match independent exhaustive feasibility',async()
   const assign=(i,used)=>i===dueDays.length||[1,2].some(day=>day<=dueDays[i]&&!used.includes(day)&&assign(i+1,[...used,day]));const feasible=assign(0,[]);const result=await generateSchedule({plan:p,...baseFacts,items});assert.equal(result.status==='complete',feasible,JSON.stringify(dueDays));
  }
 });
+
+test('daily budgets can wait for a later release instead of starving its earlier deadline',async()=>{
+ const a=task({dueAt:'2026-10-02T21:00:00-05:00',endDay:'2026-10-02'});
+ const b=task({key:'assignment:2',title:'Urgent',unlockAt:'2026-10-01T10:00:00-05:00',dueAt:'2026-10-01T21:00:00-05:00',endDay:'2026-10-01'});
+ const p=plan({range:{startDate:'2026-10-01',endDate:'2026-10-02'},tasks:Object.fromEntries([a,b].map(i=>[i.key,{...i,estimateMinutes:60,singleSession:false,completedAtSave:false}]))});p.schedule.weekdays.forEach(d=>d.maxMinutes=60);
+ const f={...baseFacts,items:[a,b]};const result=await generateSchedule({plan:p,...f});assert.equal(result.status,'complete');assert.equal(validatePlan({...p,segments:result.segments},f).complete,true);
+});
+test('generated block IDs stay unique when a previous auto block is locked',async()=>{
+ const b=task({key:'assignment:2',title:'Second'});const p=plan();p.tasks[b.key]={...b,estimateMinutes:60,singleSession:false,completedAtSave:false};p.segments=[{id:'auto-1',itemKey:'assignment:1',startAt:'2026-10-01T09:00:00-05:00',endAt:'2026-10-01T10:00:00-05:00',locked:true,order:0}];
+ const result=await generateSchedule({plan:p,...baseFacts,items:[task(),b]});assert.equal(result.status,'complete');assert.equal(new Set(result.segments.map(s=>s.id)).size,result.segments.length);
+ const {isPlanRecord}=await import('../src/storage.js');assert.equal(isPlanRecord({...p,segments:result.segments}),true);
+});
+
+test('a plan can start on a date whose local midnight is skipped',async()=>{
+ const item=task({startDay:'2026-09-06',endDay:'2026-09-07',dueAt:'2026-09-07T21:00:00-03:00'});const p=plan({timeZone:'America/Santiago',range:{startDate:'2026-09-06',endDate:'2026-09-07'},tasks:{[item.key]:{...item,estimateMinutes:60,singleSession:false,completedAtSave:false}}});const f={items:[item],completed:{},now:'2026-09-05T12:00:00Z',loadedRange:p.range};const result=await generateSchedule({plan:p,...f});assert.equal(result.status,'complete');assert.equal(validatePlan({...p,segments:result.segments},f).complete,true);
+});
+test('long-range balancing yields and obeys its budget inside candidate scans',async()=>{
+ const items=Array.from({length:200},(_,i)=>task({key:`assignment:${i+1}`,dueAt:'2026-10-01T21:00:00-05:00',endDay:'2026-10-01'}));const p=plan({range:{startDate:'2026-10-01',endDate:'2027-03-29'},tasks:Object.fromEntries(items.map(i=>[i.key,{...i,estimateMinutes:1,singleSession:false,completedAtSave:false}]))});let calls=0;
+ const result=await generateSchedule({plan:p,...baseFacts,items,loadedRange:p.range},{clock:()=>++calls>1000?1000:0,budgetMs:100,yieldControl:async()=>{}});assert.equal(result.status,'timeout');assert.equal(result.segments.length,200);
+});
+
+test('overdue work remains partial while feasible future work is still balanced',async()=>{
+ const old=task({key:'assignment:2',dueAt:'2026-09-30T21:00:00-05:00',endDay:'2026-09-30'});const p=plan();p.tasks['assignment:1'].estimateMinutes=180;p.tasks[old.key]={...old,estimateMinutes:60,singleSession:false,completedAtSave:false};const result=await generateSchedule({plan:p,...baseFacts,items:[task(),old]});assert.equal(result.status,'partial');assert.equal(result.validation.unassigned[old.key],60);assert.ok(result.metrics.afterPeakMinutes<result.metrics.beforePeakMinutes);
+});

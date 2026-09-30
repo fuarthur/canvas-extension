@@ -1,16 +1,9 @@
-export function dateKey(value, timeZone) {
-  if (!value || Number.isNaN(new Date(value).getTime())) return null;
-  let formatter;
-  try {
-    formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-      year: 'numeric', month: '2-digit', day: '2-digit'
-    });
-  } catch {
-    formatter = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
-  }
-  const parts = Object.fromEntries(formatter.formatToParts(new Date(value)).map(part => [part.type, part.value]));
-  return `${parts.year}-${parts.month}-${parts.day}`;
+const dayFormatters=new Map();
+export function dateKey(value,timeZone){
+ if(value==null||Number.isNaN(new Date(value).getTime()))return null;
+ const zone=timeZone||Intl.DateTimeFormat().resolvedOptions().timeZone;let formatter=dayFormatters.get(zone);
+ if(!formatter){try{formatter=new Intl.DateTimeFormat('en-US',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit'});}catch{formatter=new Intl.DateTimeFormat('en-US',{year:'numeric',month:'2-digit',day:'2-digit'});}dayFormatters.set(zone,formatter);}
+ const parts=Object.fromEntries(formatter.formatToParts(new Date(value)).map(part=>[part.type,part.value]));return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 export function validDay(value) {
@@ -85,4 +78,12 @@ export function zonedDateTime(day,time,timeZone,{disambiguation='earlier'}={}){
  for(let h=-48;h<=48;h+=6){const ms=target+h*3600000;const p=local(ms);offsets.add(Date.UTC(Number(p.year),Number(p.month)-1,Number(p.day),Number(p.hour),Number(p.minute),Number(p.second))-ms);}
  const candidates=[...offsets].map(offset=>target-offset).filter(ms=>{const p=local(ms);return `${p.year}-${p.month}-${p.day}`===day&&`${p.hour}:${p.minute}`===time;}).sort((a,b)=>a-b);
  return candidates.length?new Date(disambiguation==='later'?candidates.at(-1):candidates[0]).toISOString():null;
+}
+
+const dayStarts=new Map();
+export function startOfLocalDay(day,timeZone){
+ const key=`${timeZone}:${day}`;if(dayStarts.has(key))return dayStarts.get(key);
+ let result=zonedDateTime(day,'00:00',timeZone);
+ if(!result){const noon=zonedDateTime(day,'12:00',timeZone);if(noon){let lo=Date.parse(noon)-36*3600000,hi=Date.parse(noon);while(hi-lo>1){const mid=Math.floor((hi+lo)/2);if(dateKey(mid,timeZone)<day)lo=mid;else hi=mid;}if(dateKey(hi,timeZone)===day)result=new Date(hi).toISOString();}}
+ if(dayStarts.size>10000)dayStarts.clear();dayStarts.set(key,result);return result;
 }

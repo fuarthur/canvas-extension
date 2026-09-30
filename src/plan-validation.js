@@ -1,12 +1,14 @@
-import {dateKey,zonedDateTime} from './dates.js';import {buildAvailability} from './availability.js';import {resolvePlanTasks} from './plans.js';import {newId} from './ui.js';
+import {dateKey,zonedDateTime,startOfLocalDay} from './dates.js';import {buildAvailability} from './availability.js';import {resolvePlanTasks} from './plans.js';import {newId} from './ui.js';
 export function taskBounds(task,plan,now){
- const start=zonedDateTime(plan.range.startDate,'00:00',plan.timeZone);const manual=task.manualStartDay?zonedDateTime(task.manualStartDay,'00:00',plan.timeZone):null;
+ const start=startOfLocalDay(plan.range.startDate,plan.timeZone);const manual=task.manualStartDay?startOfLocalDay(task.manualStartDay,plan.timeZone):null;
  return {start:Math.ceil(Math.max(Date.parse(now),Date.parse(start),task.unlockAt?Date.parse(task.unlockAt):-Infinity,manual?Date.parse(manual):-Infinity)/60000)*60000,end:Math.floor(Date.parse(task.dueAt)/60000)*60000};
 }
 export function fixedFacts(plan,items){return [...new Map([...Object.values(plan.tasks).filter(t=>t.type==='event'),...items.filter(i=>i.type==='event')].map(i=>[i.key,i])).values()];}
 export function validatePlan(plan,{items=[],completed={},now,loadedRange}){
  const issues=[];const resolved=resolvePlanTasks(plan,{items,completed});const current=new Map(items.map(i=>[i.key,i]));const add=(code,message,extra={})=>issues.push({code,message,...extra});
  if(!loadedRange||loadedRange.startDate>plan.range.startDate||loadedRange.endDate<plan.range.endDate)add('RANGE','This plan extends beyond loaded calendar data.');
+ for(const item of items)if(item.type==='assignment'&&!item.completed&&!completed[item.key]&&item.endDay<=plan.range.endDate&&!plan.tasks[item.key])add('MISSING_TASK','A current deadline task is missing from this plan; include newly loaded tasks.',{itemKey:item.key});
+ const ids=new Set();for(const segment of plan.segments){if(ids.has(segment.id))add('DUPLICATE_ID','Work block IDs must be unique.',{segmentId:segment.id});ids.add(segment.id);}
  for(const key of resolved.unknownKeys)add('UNKNOWN','Task is not currently loaded; its deadline cannot be verified.',{itemKey:key});
  for(const change of resolved.changes)add('STALE','Task timing changed; update the plan task data before generating.',{itemKey:change.itemKey});
  const availability=buildAvailability({range:plan.range,schedule:plan.schedule,timeZone:plan.timeZone,now,fixedEvents:fixedFacts(plan,items)});issues.push(...availability.issues);const days=new Map(availability.days.map(d=>[d.day,d]));const totals={},daily={},counts={};const pending=[];
@@ -22,7 +24,7 @@ export function validatePlan(plan,{items=[],completed={},now,loadedRange}){
   if(!item.dueAt||!Number.isFinite(Date.parse(item.dueAt)))add('DEADLINE','Task has no valid current deadline.',{itemKey:saved.key});else if(end>Date.parse(item.dueAt))add('DEADLINE','Work ends after the current Canvas deadline.',{segmentId:segment.id});
   const available=days.get(day);if(!available?.intervals.some(i=>start>=Date.parse(i.startAt)&&end<=Date.parse(i.endAt)))add('WORK_WINDOW','Work overlaps a calendar activity or is outside available working time.',{segmentId:segment.id,day});
  }
- pending.sort((a,b)=>a.start-b.start);for(let i=1;i<pending.length;i++)for(let j=i-1;j>=0;j--){if(pending[j].end>pending[i].start)add('OVERLAP','Work blocks overlap.',{segmentId:pending[i].id});}
+ pending.sort((a,b)=>a.start-b.start);let latestEnd=-Infinity;for(const segment of pending){if(segment.start<latestEnd)add('OVERLAP','Work blocks overlap.',{segmentId:segment.id});latestEnd=Math.max(latestEnd,segment.end);}
  for(const [day,minutes]of Object.entries(daily))if(minutes>(days.get(day)?.budgetMinutes||0))add('CAPACITY','Planned work exceeds daily capacity.',{day});
  const unassigned={};for(const task of Object.values(plan.tasks)){if(task.type!=='assignment'||resolved.tasks[task.key].completed)continue;const amount=totals[task.key]||0;if(amount>task.estimateMinutes)add('EXCESS','Assigned time exceeds the task estimate.',{itemKey:task.key});if(amount<task.estimateMinutes)unassigned[task.key]=task.estimateMinutes-amount;if(task.singleSession&&(counts[task.key]||0)>1)add('SINGLE_SESSION','This task must fit in one continuous work block.',{itemKey:task.key});const item=current.get(task.key)||task;if(Date.parse(item.dueAt)<Date.parse(now))add('OVERDUE','This task is already overdue.',{itemKey:task.key});}
  return {valid:issues.length===0,complete:issues.length===0&&Object.keys(unassigned).length===0,issues,unassigned};
