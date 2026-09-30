@@ -23,12 +23,12 @@ test('language preference survives stale settings saves and is isolated per Canv
 async function setup({title='Settings',contextName='Today'}={}){
  const dom=new JSDOM('<main>Native Calendar</main><div class="calendar_view_buttons" role="tablist"></div>',{url:'https://canvas.illinois.edu/calendar'});
  const document=dom.window.document,host=document.createElement('div'),area=memoryStorage();
- const store=createPlannerStore(area,'canvas.illinois.edu',77);let calls=0;
- const planner=mountPlanner({host,storeFactory:()=>store,initialMonth:'2026-10',now:()=>new Date('2026-10-01T12:00:00Z'),loadSnapshot:async()=>{calls++;return {profile:{id:77,time_zone:'America/Chicago'},contexts:[{code:'course_456',name:contextName}],events:[],assignments:[{id:'assignment_1',title,context_code:'course_456',assignment:{due_at:'2026-10-03T23:59:00-05:00'}}],range:{startDate:'2026-10-01',endDate:'2026-12-31'}};}});
+ const store=createPlannerStore(area,'canvas.illinois.edu',77);let calls=0,loadGate=null;
+ const planner=mountPlanner({host,storeFactory:()=>store,initialMonth:'2026-10',now:()=>new Date('2026-10-01T12:00:00Z'),loadSnapshot:async()=>{calls++;if(loadGate)await loadGate;return {profile:{id:77,time_zone:'America/Chicago'},contexts:[{code:'course_456',name:contextName}],events:[],assignments:[{id:'assignment_1',title,context_code:'course_456',assignment:{due_at:'2026-10-03T23:59:00-05:00'}}],range:{startDate:'2026-10-01',endDate:'2026-12-31'}};}});
  const removeEntry=mountCalendarEntry({document,onOpen:()=>{}});await planner.show();
  const root=host.shadowRoot,click=async id=>{control(root,id).click();await settle();};
  const change=async(id,value)=>{const n=control(root,id);assert.ok(n,`Missing ${id}`);n.value=value;n.dispatchEvent(new dom.window.Event('change',{bubbles:true}));await settle();};
- return {dom,document,root,planner,store,click,change,get calls(){return calls;},destroy(){planner.destroy();removeEntry();dom.window.close();}};
+ return {dom,document,root,planner,store,click,change,pauseLoading(){let release;loadGate=new Promise(resolve=>{release=resolve;});return()=>{loadGate=null;release();};},get calls(){return calls;},destroy(){planner.destroy();removeEntry();dom.window.close();}};
 }
 
 test('Settings switches immediately in both directions without losing unsaved rule edits or fetching Canvas',async()=>{
@@ -129,4 +129,10 @@ test('closing from Settings presents the suspended draft decision in the visible
  const s=await setup();await s.click('Planner view');await s.click('New plan');await s.change('Plan name','Keep my draft');await s.click('Calendar settings');await s.click('Close planning calendar');
  assert.ok(s.root.querySelector('[role="alertdialog"]'),'the leave decision must be attached to the current overlay');await s.click('Return to editing');assert.equal(control(s.root,'Plan name').value,'Keep my draft');
  await s.click('Calendar settings');await s.click('Close planning calendar');await s.click('Discard draft changes');assert.equal(s.root.host.isConnected,false);assert.deepEqual((await s.store.loadPlanningState()).plans,{});s.destroy();
+});
+
+
+test('the leave decision stays visible while a suspended draft has a calendar refresh pending',async()=>{
+ const s=await setup();await s.click('Planner view');await s.click('New plan');await s.change('Plan name','Draft during refresh');await s.click('Calendar settings');const release=s.pauseLoading();
+ try{await s.click('Retry unavailable calendars');assert.match(s.root.textContent,/Loading Canvas/);await s.click('Close planning calendar');assert.ok(s.root.querySelector('[role="alertdialog"]'),'closing must not wait for Canvas before exposing the leave decision');await s.click('Discard draft changes');assert.equal(s.root.host.isConnected,false);}finally{release();await settle();s.destroy();}
 });

@@ -114,8 +114,9 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
     if(force!==true&&planController){
       // The retained draft may be suspended behind Settings. Its leave dialog
       // must be visible before waiting for a save/discard decision.
-      if(planController.hasUnsavedChanges()&&activeTab!=='planner'){activeTab='planner';render();}
-      if(!await planController.requestLeave())return;
+      const decision=planController.requestLeave();
+      if(planController.hasPendingLeaveDecision()){activeTab='planner';render();}
+      if(!await decision){render();return;}
     }
     planController?.destroy();planController=null;controllerUserId=null;
     unsubscribeStorage?.();unsubscribeStorage=null;localVersion++;
@@ -392,7 +393,7 @@ export function mountPlanner({ host, loadSnapshot, storeFactory, planClientFacto
     const body = el('div', 'content');
     body.id = 'planner-panel';
     body.setAttribute('role', 'tabpanel');
-    if (loading) body.append(el('div', 'status', 'Loading Canvas calendar…'));
+    if (loading&&!planController?.hasPendingLeaveDecision()) body.append(el('div', 'status', 'Loading Canvas calendar…'));
     else if (activeTab === 'settings' && snapshot) body.append(settings());
     else if (error && (activeTab!=='planner'||!snapshot)) {
       const status = el('div', 'status error');
