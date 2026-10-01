@@ -1,31 +1,67 @@
-import {dateKey} from './dates.js';import {buildAvailability,subtractIntervals} from './availability.js';import {taskBounds,fixedFacts,validatePlan} from './plan-validation.js';import {resolvePlanTasks,planSeries,intervalDays} from './plans.js';
+import {dateKey} from './dates.js';import {buildAvailability,subtractIntervals,bufferedInterval} from './availability.js';import {taskBounds,fixedFacts,validatePlan} from './plan-validation.js';import {resolvePlanTasks,planSeries,intervalDays} from './plans.js';
+import {canSplitTask,scheduleBufferMinutes} from './planning-settings.js';
 const duration=s=>(Date.parse(s.endAt)-Date.parse(s.startAt))/60000;
 const cloneDays=days=>days.map(d=>({...d,intervals:d.intervals.map(i=>({...i}))}));
 export async function generateSchedule(input,{signal,onProgress=()=>{},yieldControl=()=>new Promise(r=>setTimeout(r,0)),budgetMs=5000,clock=Date.now}={}){
  const {plan,items=[],completed={},now,loadedRange,historyFilter}=input;const started=clock();const facts={items,completed,now,loadedRange,historyFilter};let counter=0,states=0,stop=null;let best=[];let before={peak:0,variance:0,buffer:0};let after=before;
  const dayCache=new Map();const dayOf=instant=>{if(!dayCache.has(instant))dayCache.set(instant,dateKey(instant,plan.timeZone));return dayCache.get(instant);};
+ function mergeSegments(segments){const merged=[];for(const s of [...segments].sort((a,b)=>Date.parse(a.startAt)-Date.parse(b.startAt)||a.id.localeCompare(b.id))){const previous=merged.at(-1);if(previous&&!previous.locked&&!s.locked&&previous.itemKey===s.itemKey&&previous.endAt===s.startAt&&dayOf(previous.startAt)===dayOf(s.startAt))previous.endAt=s.endAt;else merged.push({...s});}return merged;}
  const resolved=resolvePlanTasks(plan,facts);const retained=plan.segments.filter(s=>s.locked||resolved.tasks[s.itemKey]?.completed).map(s=>({...s}));best=retained;
- const checked=validatePlan({...plan,segments:retained},facts);const pending=Object.values(plan.tasks).filter(t=>t.type==='assignment'&&!resolved.tasks[t.key]?.completed);const live=new Map(items.map(i=>[i.key,i]));
+ const bufferMinutes=scheduleBufferMinutes(plan.schedule);
+ // Manual drafts remain editable. Every generated result also verifies the gap,
+ // including retained locks and candidates moved by load balancing.
+ const checkSchedule=segments=>{
+  const validation=validatePlan({...plan,segments},facts);
+  const work=segments.filter(s=>!resolved.tasks[s.itemKey]?.completed).sort((a,b)=>Date.parse(a.startAt)-Date.parse(b.startAt));
+  for(let i=1;i<work.length;i++)if(Date.parse(work[i].startAt)-Date.parse(work[i-1].endAt)<bufferMinutes*60000)validation.issues.push({code:'BUFFER',segmentId:work[i].id,message:'Work blocks need the configured buffer. Move or unlock blocks, or reduce the buffer.'});
+  validation.valid=validation.issues.length===0;validation.complete=validation.valid&&Object.keys(validation.unassigned).length===0;return validation;
+ };
+ const checked=checkSchedule(retained);const pending=Object.values(plan.tasks).filter(t=>t.type==='assignment'&&!resolved.tasks[t.key]?.completed);const live=new Map(items.map(i=>[i.key,i]));
  // Check every batch, but only suspend once per frame. Repeated zero-delay
  // timers are clamped by browsers and can consume the entire generation budget.
  let lastYield=-Infinity;
  const checkpoint=async force=>{if(signal?.aborted){stop='cancelled';return false;}const tick=clock();if(tick-started>budgetMs){stop='timeout';return false;}if(force&&tick-lastYield>=16){await yieldControl();lastYield=clock();if(signal?.aborted){stop='cancelled';return false;}if(lastYield-started>budgetMs){stop='timeout';return false;}}return true;};
- const finish=(segments=best)=>{const validation=validatePlan({...plan,segments},facts);const issues=[...validation.issues];for(const [itemKey,missingMinutes]of Object.entries(validation.unassigned))issues.push({code:'UNASSIGNED',itemKey,missingMinutes,message:'Could not fit all estimated work before the deadline. Adjust capacity, dates or splitting.'});return {status:stop||(validation.complete?'complete':'partial'),segments,validation,issues,metrics:{beforePeakMinutes:before.peak,afterPeakMinutes:after.peak,beforeVariance:before.variance,afterVariance:after.variance}};};
+ const finish=(segments=best)=>{const validation=checkSchedule(segments);const issues=[...validation.issues];for(const [itemKey,missingMinutes]of Object.entries(validation.unassigned))issues.push({code:'UNASSIGNED',itemKey,missingMinutes,message:canSplitTask(plan.tasks[itemKey],plan)?'Could not fit all estimated work before the deadline. Adjust capacity, dates or splitting.':'Could not find a continuous work interval for the full task estimate before the deadline. Adjust capacity or dates; splitting requires permission and an estimate above the threshold.'});if(Object.keys(validation.unassigned).length&&bufferMinutes>0)issues.push({code:'BUFFER_SPACE',message:'Automatic planning reserves buffer time between work blocks. Reduce the buffer or expand working windows if work remains unassigned.'});return {status:stop||(validation.complete?'complete':'partial'),segments,validation,issues,metrics:{beforePeakMinutes:before.peak,afterPeakMinutes:after.peak,beforeVariance:before.variance,afterVariance:after.variance}};};
  if(!await checkpoint(true))return finish();
  // Overdue tasks stay visible; they do not stop scheduling other feasible tasks.
  if(checked.issues.some(i=>i.code!=='OVERDUE'))return finish();
- const locked=retained.filter(s=>!resolved.tasks[s.itemKey]?.completed);const base=buildAvailability({range:plan.range,schedule:plan.schedule,timeZone:plan.timeZone,now,fixedEvents:fixedFacts(plan,items),lockedSegments:locked});
+ const locked=retained.filter(s=>!resolved.tasks[s.itemKey]?.completed);const base=buildAvailability({range:plan.range,schedule:plan.schedule,timeZone:plan.timeZone,now,fixedEvents:fixedFacts(plan,items),lockedSegments:locked,bufferMinutes});
  const capacities=new Map(base.days.map(d=>[d.day,d.budgetMinutes]));
  const needs=new Map(pending.map(t=>[t.key,Math.max(0,t.estimateMinutes-locked.filter(s=>s.itemKey===t.key).reduce((n,s)=>n+duration(s),0))]));
  const bounds=new Map(pending.map(t=>[t.key,taskBounds(live.get(t.key)||t,plan,now)]));
  const boundDays=new Map(pending.map(t=>{const b=bounds.get(t.key);return [t.key,{start:dateKey(b.start,plan.timeZone),end:dateKey(b.end-1,plan.timeZone)}];}));
  const eligible=pending.filter(t=>bounds.get(t.key).end>bounds.get(t.key).start&&needs.get(t.key)>0);
- const singles=eligible.filter(t=>t.singleSession&&!locked.some(s=>s.itemKey===t.key));const splits=eligible.filter(t=>!t.singleSession);
+ // Authorized locked remainders need the same candidate backtracking as whole
+ // tasks; committing their first slot can starve a longer remainder.
+ const singles=eligible.filter(t=>!locked.some(s=>s.itemKey===t.key)||canSplitTask(t,plan));
  const usedIds=new Set(retained.map(s=>s.id));
  const make=(key,start,minutes)=>{let id;do{id=`auto-${++counter}`;}while(usedIds.has(id));usedIds.add(id);return {id,itemKey:key,startAt:new Date(start).toISOString(),endAt:new Date(start+minutes*60000).toISOString(),locked:false,order:counter};};
  function candidates(task,days){const need=needs.get(task.key),bound=bounds.get(task.key);const result=[];for(const day of days){if(day.budgetMinutes<need)continue;for(const interval of day.intervals){const begin=Math.max(Date.parse(interval.startAt),bound.start);const end=Math.min(Date.parse(interval.endAt),bound.end);if(end-begin>=need*60000){result.push({day:day.day,start:begin});if(end-need*60000!==begin)result.push({day:day.day,start:end-need*60000});}}}return result.sort((a,b)=>(capacities.get(a.day)-days.find(d=>d.day===a.day).budgetMinutes)-(capacities.get(b.day)-days.find(d=>d.day===b.day).budgetMinutes)||a.start-b.start);}
- function occupy(days,segment){const next=cloneDays(days);const day=next.find(d=>d.day===dateKey(segment.startAt,plan.timeZone));day.budgetMinutes-=duration(segment);day.intervals=day.intervals.flatMap(i=>subtractIntervals({start:Date.parse(i.startAt),end:Date.parse(i.endAt)},[{start:Date.parse(segment.startAt),end:Date.parse(segment.endAt)}]).map(p=>({startAt:new Date(p.start).toISOString(),endAt:new Date(p.end).toISOString()})));return next;}
- async function pack(days,placed){
+ function occupy(days,segment){const next=cloneDays(days);const day=next.find(d=>d.day===dayOf(segment.startAt));day.budgetMinutes-=duration(segment);const blocked=bufferedInterval(segment,bufferMinutes),firstDay=dayOf(blocked.start),lastDay=dayOf(blocked.end-1);for(const d of next)if(d.day>=firstDay&&d.day<=lastDay)d.intervals=d.intervals.flatMap(i=>subtractIntervals({start:Date.parse(i.startAt),end:Date.parse(i.endAt)},[blocked]).map(p=>({startAt:new Date(p.start).toISOString(),endAt:new Date(p.end).toISOString()})));return next;}
+ async function pack(days,placed,splits){
+  // Buffer overhead depends on the number of blocks, so it cannot be represented
+  // as work minutes in the flow graph. Pack authorized remainders by deadline,
+  // reserving clock time after each whole available chunk, while charging only work.
+  if(bufferMinutes>0){
+   let free=days;const segments=[...retained,...placed];
+   for(const task of [...splits].sort((a,b)=>bounds.get(a.key).end-bounds.get(b.key).end||a.key.localeCompare(b.key))){
+    if(!await checkpoint(true))return segments;
+    let remaining=needs.get(task.key);const bound=bounds.get(task.key);
+    // A remainder may still fit whole after another lock. Prefer that over
+    // consuming a small earlier gap and creating unnecessary fragments.
+    const whole=candidates(task,free)[0];
+    if(whole){const segment=make(task.key,whole.start,remaining);segments.push(segment);free=occupy(free,segment);continue;}
+    for(let dayIndex=0;dayIndex<free.length&&remaining>0;dayIndex++){
+     if(!await checkpoint(true))return segments;onProgress({phase:'arranging',day:free[dayIndex].day});
+     while(remaining>0&&free[dayIndex].budgetMinutes>0){
+      const day=free[dayIndex];const interval=day.intervals.find(i=>Math.min(Date.parse(i.endAt),bound.end)>Math.max(Date.parse(i.startAt),bound.start));if(!interval)break;
+      const start=Math.max(Date.parse(interval.startAt),bound.start);const minutes=Math.min(remaining,day.budgetMinutes,(Math.min(Date.parse(interval.endAt),bound.end)-start)/60000);
+      const segment=make(task.key,start,minutes);segments.push(segment);remaining-=minutes;free=occupy(free,segment);
+      if(!await checkpoint(false))return segments;
+     }
+    }
+   }return segments;
+  }
   // A day has a quota as well as clock windows. Flow can move flexible work
   // to another day, reserving quota for tasks that open later with tight deadlines.
   const graph=[];const node=()=>{graph.push([]);return graph.length-1;};
@@ -44,19 +80,23 @@ export async function generateSchedule(input,{signal,onProgress=()=>{},yieldCont
    while(push(source,Infinity)){if(!await checkpoint(false))break;}
    if(stop)break;
   }
-  const segments=[...retained,...placed];for(const slice of slices){let cursor=slice.start;for(const {key,edge}of slice.assignments){const minutes=edge.original-edge.capacity;if(minutes>0){segments.push(make(key,cursor,minutes));cursor+=minutes*60000;}}}return segments;
+  const segments=[...retained,...placed];for(const slice of slices){let cursor=slice.start;for(const {key,edge}of slice.assignments){const minutes=edge.original-edge.capacity;if(minutes>0){segments.push(make(key,cursor,minutes));cursor+=minutes*60000;}}}return mergeSegments(segments);
  }
 
  singles.sort((a,b)=>bounds.get(a.key).end-bounds.get(b.key).end||candidates(a,base.days).length-candidates(b,base.days).length||a.key.localeCompare(b.key));
  const assignedScore=segments=>segments.filter(s=>!resolved.tasks[s.itemKey]?.completed).reduce((n,s)=>n+duration(s),0);let bestScore=assignedScore(best);
- const balancedFeasible=segments=>{const v=validatePlan({...plan,segments},facts);return v.issues.every(i=>i.code==='OVERDUE')&&Object.keys(v.unassigned).every(key=>bounds.get(key).end<Date.parse(now));};
- async function search(index,days,placed){if(++states>2000||!await checkpoint(states%20===0))return false;
-  if(index===singles.length){const candidate=await pack(days,placed);const score=assignedScore(candidate);if(score>bestScore){best=candidate;bestScore=score;}return balancedFeasible(candidate);}
-  const task=singles[index];const choices=candidates(task,days);for(const choice of choices){const segment=make(task.key,choice.start,needs.get(task.key));if(await search(index+1,occupy(days,segment),[...placed,segment]))return true;if(stop||states>2000)break;}
+ const balancedFeasible=segments=>{const v=checkSchedule(segments);return v.issues.every(i=>i.code==='OVERDUE')&&Object.keys(v.unassigned).every(key=>bounds.get(key).end<Date.parse(now));};
+ async function search(index,days,placed,deferred,allowFallback){if(++states>2000||!await checkpoint(states%20===0))return false;
+  if(index===singles.length){const candidate=await pack(days,placed,deferred);const score=assignedScore(candidate);if(score>bestScore){best=candidate;bestScore=score;}return balancedFeasible(candidate);}
+  const task=singles[index];const choices=candidates(task,days);for(const choice of choices){const segment=make(task.key,choice.start,needs.get(task.key));if(await search(index+1,occupy(days,segment),[...placed,segment],deferred,allowFallback))return true;if(stop||states>2000)break;}
   // Keep a partial preview that still arranges the remaining feasible work.
-  if(!stop&&states<=2000)await search(index+1,days,placed);return false;
+  if(allowFallback&&!stop&&states<=2000)return search(index+1,days,placed,canSplitTask(task,plan)?[...deferred,task]:deferred,true);return false;
  }
- await search(0,cloneDays(base.days),[]);if(stop)return finish();
+ // Try an entirely continuous schedule first. Only fall back to authorized
+ // splitting when no continuous solution was found within the search budget.
+ let continuous=false;
+ if(singles.every(t=>candidates(t,base.days).length))continuous=await search(0,cloneDays(base.days),[],[],false);
+ if(!continuous&&!stop){states=0;await search(0,cloneDays(base.days),[],[],true);}if(stop)return finish();
  const fixedPoints=planSeries({...plan,segments:[]},{items,completed,mode:'remaining'});const segmentDays=new Map();const baseDays=new Map(base.days.map(day=>[day.day,day]));
  function measure(segments){
   const points=fixedPoints.map(p=>({...p})),byDay=new Map(points.map(p=>[p.day,p])),lastEnds=new Map();
@@ -70,15 +110,15 @@ export async function generateSchedule(input,{signal,onProgress=()=>{},yieldCont
  if(balancedFeasible(best)){balance:for(let iteration=0;iteration<2000;iteration++){
    if(!await checkpoint(true))break;let accepted=false;const points=after.points;const sources=[...points].sort((a,b)=>b.minutes-a.minutes||a.day.localeCompare(b.day));const targets=[...points].filter(p=>capacities.get(p.day)>0).sort((a,b)=>a.minutes-b.minutes||a.day.localeCompare(b.day));
    const movableByDay=new Map(),freeByDay=new Map();for(const segment of best){if(segment.locked||resolved.tasks[segment.itemKey]?.completed)continue;const day=dayOf(segment.startAt);if(!movableByDay.has(day))movableByDay.set(day,[]);movableByDay.get(day).push(segment);}
-   const freeOn=key=>{if(!freeByDay.has(key)){const day=baseDays.get(key),occupied=movableByDay.get(key)||[];freeByDay.set(key,{minutes:(day?.budgetMinutes||0)-occupied.reduce((sum,segment)=>sum+duration(segment),0),intervals:day?.intervals.flatMap(interval=>subtractIntervals({start:Date.parse(interval.startAt),end:Date.parse(interval.endAt)},occupied.map(segment=>({start:Date.parse(segment.startAt),end:Date.parse(segment.endAt)}))))||[]});}return freeByDay.get(key);};
+   const freeOn=key=>{if(!freeByDay.has(key)){const day=baseDays.get(key),occupied=movableByDay.get(key)||[];freeByDay.set(key,{minutes:(day?.budgetMinutes||0)-occupied.reduce((sum,segment)=>sum+duration(segment),0),intervals:day?.intervals.flatMap(interval=>subtractIntervals({start:Date.parse(interval.startAt),end:Date.parse(interval.endAt)},best.filter(s=>!s.locked&&!resolved.tasks[s.itemKey]?.completed).map(segment=>bufferedInterval(segment,bufferMinutes))))||[]});}return freeByDay.get(key);};
    outer:for(const source of sources)for(const target of targets){if(source.day===target.day||source.minutes<=target.minutes+1)continue;for(const segment of movableByDay.get(source.day)||[]){
      if(++scans%25===0&&!await checkpoint(true))break balance;
-     const task=plan.tasks[segment.itemKey];if(task.type!=='assignment')continue;const window=boundDays.get(task.key);if(target.day<window.start||target.day>window.end)continue;const chunk=task.singleSession?duration(segment):Math.min(duration(segment),Math.floor((source.minutes-target.minutes)/2));if(chunk<=0)continue;
-     const shortened=best.filter(s=>s.id!==segment.id);if(chunk<duration(segment))shortened.push({...segment,endAt:new Date(Date.parse(segment.endAt)-chunk*60000).toISOString()});
+     const task=plan.tasks[segment.itemKey];if(task.type!=='assignment')continue;const window=boundDays.get(task.key);if(target.day<window.start||target.day>window.end)continue;const chunk=duration(segment);if(chunk<=0)continue;
+     const remaining=best.filter(s=>s.id!==segment.id);
      const free=freeOn(target.day);if(free.minutes<chunk)continue;const bound=bounds.get(task.key);
-     for(const interval of free.intervals){const begin=Math.max(interval.start,bound.start);if(begin+chunk*60000>Math.min(interval.end,bound.end))continue;const candidate=[...shortened,make(task.key,begin,chunk)];const score=measure(candidate);if(improves(score,after)&&balancedFeasible(candidate)){best=candidate;after=score;accepted=true;onProgress({phase:'balancing',peakMinutes:score.peak});break outer;}}
+     for(const interval of free.intervals){const begin=Math.max(interval.start,bound.start);if(begin+chunk*60000>Math.min(interval.end,bound.end))continue;const candidate=mergeSegments([...remaining,make(task.key,begin,chunk)]);const score=measure(candidate);if(improves(score,after)&&balancedFeasible(candidate)){best=candidate;after=score;accepted=true;onProgress({phase:'balancing',peakMinutes:score.peak});break outer;}}
    }}if(!accepted)break;
   }}
- const merged=[];for(const s of [...best].sort((a,b)=>Date.parse(a.startAt)-Date.parse(b.startAt)||a.id.localeCompare(b.id))){const previous=merged.at(-1);if(previous&&!previous.locked&&!s.locked&&previous.itemKey===s.itemKey&&previous.endAt===s.startAt&&dayOf(previous.startAt)===dayOf(s.startAt))previous.endAt=s.endAt;else merged.push({...s});}
+ const merged=mergeSegments(best);
  after=measure(merged);return finish(merged);
 }

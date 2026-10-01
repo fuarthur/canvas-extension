@@ -1,13 +1,24 @@
 {
   "manifest_version": 3,
   "name": "Canvas Planning Calendar",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Task agenda, bulk planning, workload charts and balanced study plans for Illinois Canvas.",
   "permissions": ["storage"],
   "host_permissions": ["https://canvas.illinois.edu/*"],
   "action": { "default_title": "Toggle planning calendar" },
   "background": { "service_worker": "background.js" },
   "content_scripts": [{
+    "matches": ["https://canvas.illinois.edu/*"],
+    "exclude_matches": ["https://canvas.illinois.edu/login*", "https://canvas.illinois.edu/logout*", "https://canvas.illinois.edu/oauth2*", "https://canvas.illinois.edu/files/*/preview*", "https://canvas.illinois.edu/courses/*/files/*/preview*", "https://canvas.illinois.edu/media_objects_iframe/*"],
+    "js": ["appearance.js"],
+    "run_at": "document_start",
+    "all_frames": false
+  },{
+    "matches": ["https://canvas.illinois.edu/calendar*"],
+    "js": ["calendar-bridge.js"],
+    "world": "MAIN",
+    "run_at": "document_idle"
+  },{
     "matches": ["https://canvas.illinois.edu/calendar*"],
     "js": ["content.js"],
     "run_at": "document_idle"

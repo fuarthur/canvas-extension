@@ -1,4 +1,6 @@
 import {validLanguage} from './i18n.js';
+import {defaultTheme,validTheme,normalizeTheme} from './themes.js';
+import {appearanceAccountKey,loadInitialAppearance,normalizeThemeScope,validThemeScope,saveThemeScope} from './appearance.js';
 import {defaultSettings,validateSettings,validateSchedule,validMinutes} from './planning-settings.js';
 import {validDay,daysBetween} from './dates.js';
 import {validTarget,defaultTaskPreferences,validateTaskPreferences} from './tasks.js';
@@ -14,6 +16,10 @@ function taskTransaction(storageArea,name,operation){
   tail.then(()=>{if(queues.get(name)===tail)queues.delete(name);});return next;
 }
 const writeVersion=()=>globalThis.crypto?.randomUUID?.()||`${Date.now()}:${Math.random()}`;
+// Only the loading screen uses this hint. Verified Canvas identity still owns all account data.
+export async function loadInitialTheme(storageArea,hostname){
+  return (await loadInitialAppearance(storageArea,hostname)).theme;
+}
 export function createPlannerStore(storageArea, hostname, userId) {
   const prefix = `canvas-planner:${hostname}:${userId}:`;
   const startKey = itemKey => `${prefix}start:${itemKey}`;
@@ -46,12 +52,18 @@ export function createPlannerStore(storageArea, hostname, userId) {
     },
     async loadPlanningState() {
       const entries = await storageArea.get(null);
-      const state = {settings:defaultSettings(),estimates:{},targets:{},taskPreferences:defaultTaskPreferences(),singleSessions:{},plans:{},warnings:[]};
+      const state = {settings:defaultSettings(),estimates:{},targets:{},taskPreferences:defaultTaskPreferences(),singleSessions:{},allowSplitting:{},plans:{},warnings:[]};
       if(entries[`${prefix}settings:v1`] != null) {
         const checked=validateSettings(entries[`${prefix}settings:v1`]);
         if(checked.value)state.settings=checked.value;else state.warnings.push('Saved planning settings are invalid; using defaults.');
       }
       state.settings.language=validLanguage(entries[`${prefix}language`])?entries[`${prefix}language`]:'en';
+      const theme=entries[`${prefix}theme:v1`];
+      state.theme=theme==null?defaultTheme():normalizeTheme(theme);
+      if(theme!=null&&!validTheme(theme))state.warnings.push('Saved appearance settings are invalid; using defaults.');
+      const themeScope=entries[`${prefix}theme-scope:v1`];
+      state.themeScope=normalizeThemeScope(themeScope);
+      if(themeScope!=null&&!validThemeScope(themeScope))state.warnings.push('Saved theme scope is invalid; using Planning tab only.');
       state.taskPreferences=validateTaskPreferences(entries[`${prefix}task-preferences`]);
       for(const [key,value] of Object.entries(entries)){
         if(!key.startsWith(prefix))continue;
@@ -59,6 +71,7 @@ export function createPlannerStore(storageArea, hostname, userId) {
         if(suffix.startsWith('estimate:')&&validMinutes(value))state.estimates[suffix.slice(9)]=value;
         if(suffix.startsWith('target:')&&validTarget(value))state.targets[suffix.slice(7)]=value;
         if(suffix.startsWith('single-session:')&&value===true)state.singleSessions[suffix.slice(15)]=true;
+        if(suffix.startsWith('allow-splitting:')&&value===true)state.allowSplitting[suffix.slice(16)]=true;
         if(suffix.startsWith('plan:')){
           if(isPlanRecord(value)&&value.id===suffix.slice(5))state.plans[value.id]=value;
           else state.warnings.push(`Saved plan ${suffix.slice(5)} cannot be read; its record was preserved.`);
@@ -67,6 +80,9 @@ export function createPlannerStore(storageArea, hostname, userId) {
       return state;
     },
     async setLanguage(language){if(!validLanguage(language))throw new Error('Unsupported language.');await storageArea.set({[`${prefix}language`]:language});},
+    async rememberAppearance(){await storageArea.set({[appearanceAccountKey(hostname)]:String(userId)});},
+    async setTheme(value){if(!validTheme(value))throw new Error('Choose a valid theme and six-digit hex colors.');await storageArea.set({[`${prefix}theme:v1`]:normalizeTheme(value),[appearanceAccountKey(hostname)]:String(userId)});},
+    setThemeScope(value){return saveThemeScope(storageArea,hostname,userId,value);},
     async setTaskPreferences(value){await storageArea.set({[`${prefix}task-preferences`]:validateTaskPreferences(value)});},
     async applyTaskBatch(itemKeys,patch){
       if(!Array.isArray(itemKeys)||!itemKeys.length||itemKeys.some(key=>!validItemKey(key)))throw new Error('Select valid tasks.');
@@ -100,6 +116,7 @@ export function createPlannerStore(storageArea, hostname, userId) {
     async setSettings(settings){const checked=validateSettings(settings);if(!checked.value)throw new Error(checked.errors.join(' '));await storageArea.set({[`${prefix}settings:v1`]:checked.value});},
     async setEstimate(itemKey,minutes){if(minutes!=null&&!validMinutes(minutes))throw new Error('Estimate must be 1–1440 whole minutes.');await writeField(`${prefix}estimate:${itemKey}`,minutes??null);},
     async setSingleSession(itemKey,value){if(value)await storageArea.set({[`${prefix}single-session:${itemKey}`]:true});else await storageArea.remove(`${prefix}single-session:${itemKey}`);},
+    async setAllowSplitting(itemKey,value){if(!validItemKey(itemKey)||typeof value!=='boolean')throw new Error('Choose a task and whether to allow splitting.');await writeField(`${prefix}allow-splitting:${itemKey}`,value);},
     async setSelectedCalendars(codes) {
       await storageArea.set({ [`${prefix}calendars`]: [...new Set(codes)] });
     }
@@ -112,8 +129,10 @@ export const validInstant=value=>typeof value==='string'&&Number.isFinite(Date.p
 export function isPlanRecord(p){
  if(!p||p.schemaVersion!==1||!validPlanId(p.id)||typeof p.name!=='string'||!p.name.trim()||p.name.length>120||!Number.isInteger(p.revision)||p.revision<0||!validInstant(p.createdAt)||!validInstant(p.updatedAt)||!validDay(p.range?.startDate)||!validDay(p.range?.endDate)||p.range.endDate<p.range.startDate||typeof p.timeZone!=='string'||validateSchedule(p.schedule).length||!p.tasks||typeof p.tasks!=='object'||Array.isArray(p.tasks)||!Array.isArray(p.segments))return false;
  if(daysBetween(p.range.startDate,p.range.endDate).length>180)return false;
+ if(p.nonSplitThresholdMinutes!=null&&!validMinutes(p.nonSplitThresholdMinutes))return false;
  try {new Intl.DateTimeFormat('en',{timeZone:p.timeZone});}catch{return false;}
  for(const [key,t] of Object.entries(p.tasks))if(!validItemKey(key)||t?.key!==key||!['event','assignment'].includes(t.type)||typeof t.title!=='string'||!validMinutes(t.estimateMinutes)||!Array.isArray(t.contextCodes)||!Array.isArray(t.contexts)||typeof t.singleSession!=='boolean')return false;
+ for(const t of Object.values(p.tasks))if(t.allowSplitting!=null&&typeof t.allowSplitting!=='boolean')return false;
  const ids=new Set();for(const s of p.segments){if(!validPlanId(s.id)||ids.has(s.id)||!p.tasks[s.itemKey]||!validInstant(s.startAt)||!validInstant(s.endAt)||Date.parse(s.endAt)<=Date.parse(s.startAt)||typeof s.locked!=='boolean'||!Number.isFinite(s.order))return false;ids.add(s.id);}
  return true;
 }

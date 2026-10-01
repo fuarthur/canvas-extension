@@ -1,0 +1,38 @@
+<!doctype html><html><head><style>
+body{background:#fff;color:#273540} #header{background:#13294b;color:#fff}
+.ig-header,.ig-row,.ic-DashboardCard,.ic-Table td,.fc-widget-content,.ui-dialog{background:#fff;color:#273540;border:1px solid #c7cdd1}
+.btn,.Button,input,select{background:#fff;color:#273540;border:1px solid #c7cdd1}
+a{color:#b74d04}.user_content{background:#fff;color:#273540}
+.fc-event{background:#fff;color:#254284;border:1px solid #254284}.context-list-toggle-box{background:#254284}
+.alert-success{background:#dceee4;color:#246e4a}.alert-error{background:#fbe0df;color:#a02e32}
+#calendar-list-holder{background:#fff}#minical .fc-button,#minical .fc-day-number{color:#636d75}.ic-icon-svg{fill:#13294b}
+</style><script>
+const prefix='canvas-planner:'+location.hostname+':77:';
+const defaultTheme={preset:'dark',custom:{base:'light',accent:'#344f78',background:'#f5f7fb',surface:'#ffffff',text:'#1f2937'}};
+let entries=JSON.parse(localStorage.getItem('__appearance_test_records')||'null')||{[prefix+'theme:v1']:defaultTheme,[prefix+'theme-scope:v1']:'canvas',['canvas-planner:'+location.hostname+':appearance-account:v1']:'77'};
+const listeners=new Set();
+const area={async get(keys){return structuredClone(entries);},async set(values){Object.assign(entries,structuredClone(values));localStorage.setItem('__appearance_test_records',JSON.stringify(entries));const changes=Object.fromEntries(Object.entries(values).map(([key,newValue])=>[key,{newValue}]));for(const fn of listeners)fn(changes,'local');},async remove(key){delete entries[key];}};
+window.chrome={storage:{local:area,onChanged:{addListener:fn=>listeners.add(fn),removeListener:fn=>listeners.delete(fn)}}};
+window.fetch=async()=>{await new Promise(resolve=>setTimeout(resolve,2000));return{ok:true,headers:{get:()=> 'application/json'},json:async()=>({id:77})};};
+const frames=[];const started=performance.now();
+function frame(){if(document.body){const style=getComputedStyle(document.body);frames.push({ms:Math.round(performance.now()-started),background:style.backgroundColor,opacity:style.opacity,pending:document.documentElement.hasAttribute('data-canvas-planning-appearance-pending'),theme:document.documentElement.getAttribute('data-canvas-planning-theme')});const evidence=document.querySelector('#first-frame-evidence');if(evidence)evidence.textContent=JSON.stringify({first:frames[0],firstVisible:frames.find(f=>f.opacity!=='0'),frames:frames.slice(0,12),samples:frames.length});}if(frames.length<100)requestAnimationFrame(frame);}
+requestAnimationFrame(frame);
+</script><script src='/dist/appearance.js'></script></head><body><header id="header"><a class="ic-app-header__menu-list-link"><svg class="ic-icon-svg"><path></path></svg>Canvas</a></header>
+<div id="wrapper"><nav id="section-tabs"><a>Modules</a></nav><main id="content"><div id="theme-controls"></div><pre id="first-frame-evidence" hidden></pre>
+<section class="item-group-condensed"><div class="ig-header">Unit One</div><div class="ig-row"><a class="ig-title">Reading</a></div></section>
+<article class="ic-DashboardCard"><div class="ic-DashboardCard__header_image" data-protected="swatch" style="background-color:#24634b"></div><div class="ic-DashboardCard__header_content">Course</div></article>
+<div id="calendar-app"><table><tbody><tr><td class="fc-widget-content">1<a class="fc-event" data-protected><span class="fc-title">Essay</span></a></td></tr></tbody></table></div>
+<div id="right-side"><div id="minical"><button class="fc-button">Next month</button><button class="fc-day-number">1</button></div><div id="calendar-list-holder"><ul id="calendars-context-list"><li><span class="context-list-toggle-box" data-protected="swatch"></span><label>Course</label></li></ul></div></div>
+<button class="btn" id="neutral-button">Choose</button><input id="neutral-input" placeholder="Search"><select><option>All</option></select>
+<table class="ic-Table"><tbody><tr><td id="neutral-cell">Assignment</td><td><span class="alert-success" data-protected>Submitted</span></td></tr></tbody></table>
+<p class="alert-error" data-protected>Late</p><div class="ui-dialog"><button class="btn">Done</button></div>
+<div class="user_content"><span data-protected style="color:#aa0033">Teacher color</span><button class="btn" data-protected>Content button</button><table class="ic-Table"><tbody><tr><td data-protected>Content table</td></tr></tbody></table><a data-protected>Content link</a><code data-protected style="color:#aa0033;background:#fff">Code</code></div>
+<svg data-protected style="color:#cc0000"><path fill="#cc0000"></path></svg><canvas data-protected="media"></canvas><img data-protected="media" alt="Illustration"><iframe data-protected="media" title="Embedded tool"></iframe>
+</main></div><script type='module'>
+import {createThemeSettings} from '/src/theme-settings-view.js';
+import {createPlannerStore} from '/src/storage.js';
+const store=createPlannerStore(area,location.hostname,77);
+const state=await store.loadPlanningState();
+const editor=createThemeSettings({document,value:state.theme,scope:state.themeScope,onSave:async value=>{await store.setTheme(value);return (await store.loadPlanningState()).theme;},onSaveScope:async value=>{await store.setThemeScope(value);return (await store.loadPlanningState()).themeScope;}});
+document.querySelector('#theme-controls').append(editor.element);
+</script></body></html>

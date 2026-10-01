@@ -3,7 +3,7 @@ import { copyFile, mkdir } from 'node:fs/promises';
 
 await mkdir('dist', { recursive: true });
 await build({
-  entryPoints: { content: 'src/content.js', background: 'src/background.js' },
+  entryPoints: { appearance:'src/appearance-entry.js',content: 'src/content.js', background: 'src/background.js', 'calendar-bridge': 'src/calendar-bridge-entry.js' },
   outdir: 'dist',
   bundle: true,
   format: 'iife',

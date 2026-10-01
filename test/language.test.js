@@ -64,7 +64,7 @@ test('changing language preserves a dirty planner draft, original task text and 
  const name=control(root,'Plan name');name.value='Settings';name.dispatchEvent(new dom.window.Event('change'));
  controller.setData({state:{...state,settings:{...state.settings,language:'zh-CN'}}});
  assert.equal(control(root,'Plan name').value,'Settings');assert.match(root.textContent,/尚未保存/);assert.equal(root.querySelector('.task-title').textContent,'Settings');
- control(root,'Arrange Settings').click();control(root,'Add work block').click();assert.match(root.querySelector('[data-plan-day="2026-10-01"]').textContent,/今天.*1小时/);
+ control(root,'Arrange Settings').click();control(root,'Add work block').click();assert.match(root.querySelector('[data-plan-day="2026-10-01"]').textContent,/1小时/);assert.equal(root.querySelector('.week-block-title').textContent,'Settings');assert.equal(control(root,'Next plan week').getAttribute('aria-label'),'下一周');assert.match(root.querySelector('.week-day-header.is-today').textContent,/1 项任务.*1小时/);
  control(root,'Save plan').click();await settle();assert.equal(saved.name,'Settings');assert.equal(saved.segments.length,1);assert.match(root.textContent,/计划已保存/);controller.destroy();dom.window.close();
 });
 
@@ -74,7 +74,7 @@ test('failed language writes retain the active language and show a recoverable m
 });
 
 test('language changes retain an in-progress work-block editor and expanded plan settings',()=>{
- const dom=new JSDOM('<main/>'),document=dom.window.document,item=task();const original=plan();const state=planningState({plans:{[original.id]:original}});
+ const dom=new JSDOM('<main/>'),document=dom.window.document,item=task();const original=plan();Object.assign(original.tasks[item.key],{estimateMinutes:90,allowSplitting:true});const state=planningState({estimates:{[item.key]:90},allowSplitting:{[item.key]:true},plans:{[original.id]:original}});
  const controller=createPlannerController({document,state,items:[item],now:()=>new Date('2026-10-01T12:00:00Z'),timeZone:'America/Chicago',loadedRange:original.range,planClient:{}});
  const root=controller.render();document.querySelector('main').append(root);root.querySelector('.plan-configuration').open=true;
  control(root,'Arrange Essay').click();const minutes=control(root,'Work minutes');minutes.value='30';minutes.dispatchEvent(new dom.window.Event('change'));
@@ -134,5 +134,5 @@ test('closing from Settings presents the suspended draft decision in the visible
 
 test('the leave decision stays visible while a suspended draft has a calendar refresh pending',async()=>{
  const s=await setup();await s.click('Planner view');await s.click('New plan');await s.change('Plan name','Draft during refresh');await s.click('Calendar settings');const release=s.pauseLoading();
- try{await s.click('Retry unavailable calendars');assert.match(s.root.textContent,/Loading Canvas/);await s.click('Close planning calendar');assert.ok(s.root.querySelector('[role="alertdialog"]'),'closing must not wait for Canvas before exposing the leave decision');await s.click('Discard draft changes');assert.equal(s.root.host.isConnected,false);}finally{release();await settle();s.destroy();}
+ try{await s.click('Retry unavailable calendars');assert.ok(s.root.querySelector('.planning-settings'),'settings remain visible during the update');await s.click('Close planning calendar');assert.ok(s.root.querySelector('[role="alertdialog"]'),'closing must not wait for Canvas before exposing the leave decision');await s.click('Discard draft changes');assert.equal(s.root.host.isConnected,false);}finally{release();await settle();s.destroy();}
 });

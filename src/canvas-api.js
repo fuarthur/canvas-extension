@@ -1,12 +1,15 @@
 import {validDay,daysBetween} from './dates.js';
+import {calendarLoadingRange,normalizeCalendarLoading,visibleCalendarRange} from './calendar-loading.js';
+import {createCalendarCache,SNAPSHOT_RETENTION_MS} from './calendar-cache.js';
 const ORIGIN = 'https://canvas.illinois.edu';
 const CACHE_MS = 5 * 60 * 1000;
 
-export function createCanvasLoader({ fetchImpl = fetch, readSelection, now = Date.now } = {}) {
+export function createCanvasLoader({ fetchImpl = fetch, readSelection, readLoadingSettings, storageArea, hostname, now = Date.now } = {}) {
   const cache = new Map();
   const snapshots = new Map();
   const pending = new Map();
   const generations = new Map();
+  const persistentCache=createCalendarCache(storageArea,hostname);
   let active = 0;
   const waiting = [];
   const limitedFetch = async (...args) => {
@@ -18,7 +21,7 @@ export function createCanvasLoader({ fetchImpl = fetch, readSelection, now = Dat
       else active--;
     }
   };
-  return (month, options = {}) => loadCanvasSnapshot({ fetchImpl: limitedFetch, readSelection, now, cache, snapshots, pending, generations, month, ...options });
+  return (month, options = {}) => loadCanvasSnapshot({ fetchImpl: limitedFetch, readSelection, readLoadingSettings, persistentCache, now, cache, snapshots, pending, generations, month, ...options });
 }
 
 export class CanvasApiError extends Error {
@@ -87,19 +90,6 @@ export async function fetchPages(fetchImpl, url, listKey = null) {
   return rows;
 }
 
-function monthRange(month, margin = 6) {
-  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
-    throw new CanvasApiError('DATA', 'Invalid calendar month.');
-  }
-  const [year, oneBasedMonth] = month.split('-').map(Number);
-  const m = oneBasedMonth - 1;
-  const day = date => date.toISOString().slice(0, 10);
-  return {
-    startDate: day(new Date(Date.UTC(year, m - margin, 1))),
-    endDate: day(new Date(Date.UTC(year, m + margin + 1, 0)))
-  };
-}
-
 function chunks(values, size) {
   const result = [];
   for (let index = 0; index < values.length; index += size) result.push(values.slice(index, index + size));
@@ -136,52 +126,93 @@ async function fetchCalendarBatch(fetchImpl, type, codes, range) {
   }
 }
 
-export async function loadCanvasSnapshot({ fetchImpl = fetch, month, readSelection, cache = new Map(), snapshots = new Map(), pending = new Map(), generations = new Map(), now = Date.now, force = false, onCached, retryUnavailable = false, range: requestedRange }) {
-  const range = requestedRange || monthRange(month);
-  if(!validDay(range.startDate)||!validDay(range.endDate)||range.endDate<range.startDate||daysBetween(range.startDate,range.endDate).length>732)throw new CanvasApiError('DATA','Invalid planning date range.');
+export async function loadCanvasSnapshot({ fetchImpl = fetch, month, readSelection, readLoadingSettings, persistentCache, cache = new Map(), snapshots = new Map(), pending = new Map(), generations = new Map(), now = Date.now, force = false, onCached, onPartial, retryUnavailable = false, range: requestedRange }) {
+  try {calendarLoadingRange(month);}catch {throw new CanvasApiError('DATA','Invalid calendar month.');}
+  if(requestedRange&&(!validDay(requestedRange.startDate)||!validDay(requestedRange.endDate)||requestedRange.endDate<requestedRange.startDate||daysBetween(requestedRange.startDate,requestedRange.endDate).length>732))throw new CanvasApiError('DATA','Invalid planning date range.');
   let profile;
   try { profile = (await getJson(fetchImpl, `${ORIGIN}/api/v1/users/self/profile`)).body; }
-  catch(error) { if(error.code==='AUTH'){snapshots.clear();cache.clear();pending.clear();generations.clear();} throw error; }
+  catch(error) { if(error.code==='AUTH'){snapshots.clear();cache.clear();pending.clear();generations.clear();await persistentCache?.clear().catch(()=>{});} throw error; }
   if (!profile || !Number.isFinite(Number(profile.id))) {
     throw new CanvasApiError('DATA', 'Canvas did not identify the signed-in user.');
   }
   const userId = String(profile.id);
-  let savedSelection;
-  try { savedSelection = await readSelection?.(profile.id); }
+  let savedSelection,loadingSettings;
+  try { [savedSelection,loadingSettings] = await Promise.all([readSelection?.(profile.id),readLoadingSettings?.(profile.id)]); }
   catch(error) { error.snapshot = {profile,contexts:[],selectedCalendars:[],unavailableCalendars:[],events:[],assignments:[],range:null,warnings:[]}; throw error; }
   const selectionKey = JSON.stringify(Array.isArray(savedSelection) ? [...new Set(savedSelection)].sort() : null);
-  const key = JSON.stringify([userId, selectionKey, range.startDate, range.endDate]);
+  const normalizedLoading=normalizeCalendarLoading(loadingSettings);
+  const configuredRange=calendarLoadingRange(month,normalizedLoading);
+  // Buffered extra semesters overlap adjacent terms. Coverage of the viewed
+  // month alone must not turn a Summer buffer into an incomplete Fall load.
+  const policyKey=JSON.stringify([normalizedLoading,normalizedLoading.mode==='semester'?configuredRange:null]);
+  const range=requestedRange||configuredRange;
+  const key = JSON.stringify([userId, selectionKey, policyKey, range.startDate, range.endDate]);
+  // Read only after Canvas has verified the current account. Storage failures
+  // affect the optional cache, never access to fresh Canvas data.
+  const ticket=await persistentCache?.begin(userId).catch(()=>null);
+  const persisted=await persistentCache?.read(userId,now(),ticket).catch(()=>null);
+  if(persisted) {
+    const persistedKey=JSON.stringify([userId,persisted.selectionKey,persisted.policyKey,persisted.snapshot.range.startDate,persisted.snapshot.range.endDate]);
+    const previous=snapshots.get(persistedKey);
+    if(!previous||previous.ticket?.sequence<persisted.ticket?.sequence||(!previous.ticket&&previous.savedAt<persisted.savedAt)) {
+      snapshots.delete(persistedKey);snapshots.set(persistedKey,persisted);
+    }
+  }
   const bypass = force || retryUnavailable;
+  let reusable;
   if (!bypass) {
-    const coverage = requestedRange || monthRange(month, 0);
-    const reusable = [...snapshots.values()].reverse().find(entry => entry.userId === userId && entry.selectionKey === selectionKey && entry.snapshot.range.startDate <= coverage.startDate && entry.snapshot.range.endDate >= coverage.endDate);
+    const coverage = requestedRange || calendarLoadingRange(month,{mode:'months',pastMonths:0,futureMonths:0});
+    reusable = [...snapshots.values()].reverse().find(entry => entry.userId === userId && entry.selectionKey === selectionKey && entry.policyKey===policyKey && (!ticket||(entry.ticket?.epoch===ticket.epoch&&entry.ticket?.userEpoch===ticket.userEpoch)) && now()-entry.savedAt<SNAPSHOT_RETENTION_MS && entry.snapshot.range.startDate <= coverage.startDate && entry.snapshot.range.endDate >= coverage.endDate);
     if (reusable) {
       const snapshot = { ...reusable.snapshot, profile };
-      if (reusable.expires > now()) return snapshot;
+      if (reusable.complete && reusable.expires > now()) return snapshot;
       await onCached?.(snapshot);
     }
-    if (pending.has(key)) return pending.get(key);
+    const inFlight=pending.get(key);
+    if(inFlight&&inFlight.ticket?.epoch===ticket?.epoch&&inFlight.ticket?.userEpoch===ticket?.userEpoch)return inFlight.request;
   }
-  const generationKey = JSON.stringify([userId, selectionKey]);
+  const generationKey = JSON.stringify([userId, selectionKey,policyKey]);
   const generation = Symbol();
   generations.set(generationKey, generation);
-  const request = fetchSnapshotData({fetchImpl, profile, userId, savedSelection, cache, now, retryUnavailable, range});
-  pending.set(key, request);
+  const requestedAt=now();
+  const saveSnapshot=async(snapshot,complete)=>{
+    if(generations.get(generationKey)!==generation)return;
+    const savedAt=now(),entry={userId,selectionKey,policyKey,snapshot,complete,requestedAt,savedAt,expires:savedAt+CACHE_MS,ticket};
+    const snapshotKey=JSON.stringify([userId,selectionKey,policyKey,snapshot.range.startDate,snapshot.range.endDate]);
+    snapshots.delete(snapshotKey);snapshots.set(snapshotKey,entry);
+    while(snapshots.size>24)snapshots.delete(snapshots.keys().next().value);
+    await persistentCache?.write(entry).catch(()=>{});
+  };
+  const request = (async()=>{
+    if(!bypass&&!reusable&&onPartial&&!requestedRange) {
+      const firstRange=visibleCalendarRange(month,range);
+      if(firstRange.startDate!==range.startDate||firstRange.endDate!==range.endDate) {
+        const partial=await fetchSnapshotData({fetchImpl,profile,userId,savedSelection,cache,now,retryUnavailable,range:firstRange});
+        await saveSnapshot(partial,false);
+        await onPartial(partial);
+      }
+    }
+    return fetchSnapshotData({fetchImpl, profile, userId, savedSelection, cache, now, retryUnavailable, range});
+  })();
+  pending.set(key, {request,ticket});
   try {
     const snapshot = await request;
     // Earlier responses must not supersede newer requests, even for other ranges.
-    if (pending.get(key) === request && generations.get(generationKey) === generation) {
-      snapshots.delete(key);
-      snapshots.set(key, {userId, selectionKey, snapshot, expires: now() + CACHE_MS});
-      while (snapshots.size > 24) snapshots.delete(snapshots.keys().next().value);
+    if (pending.get(key)?.request === request && generations.get(generationKey) === generation) {
+      await saveSnapshot(snapshot,true);
     }
     return snapshot;
   } catch(error) {
-    if(error.code==='AUTH'){for(const [cacheKey,entry] of snapshots)if(entry.userId===userId)snapshots.delete(cacheKey);cache.delete(userId);generations.delete(generationKey);}
+    if(error.code==='AUTH'){
+      for(const [cacheKey,entry] of snapshots)if(entry.userId===userId)snapshots.delete(cacheKey);
+      for(const cacheKey of generations.keys())if(JSON.parse(cacheKey)[0]===userId)generations.delete(cacheKey);
+      for(const cacheKey of pending.keys())if(JSON.parse(cacheKey)[0]===userId)pending.delete(cacheKey);
+      cache.delete(userId);await persistentCache?.clear(userId).catch(()=>{});
+    }
     else error.snapshot ??= {profile,contexts:[],selectedCalendars:Array.isArray(savedSelection)?savedSelection:[],unavailableCalendars:[],events:[],assignments:[],range:null,warnings:[]};
     throw error;
   } finally {
-    if(pending.get(key)===request)pending.delete(key);
+    if(pending.get(key)?.request===request)pending.delete(key);
     if(generations.get(generationKey)===generation)generations.delete(generationKey);
   }
 }

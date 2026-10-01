@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPlannerStore } from '../src/storage.js';
+import { defaultSettings } from '../src/planning-settings.js';
 
 function memoryStorage() {
   const values = new Map();
@@ -14,6 +15,16 @@ function memoryStorage() {
     async remove(key) { values.delete(key); }
   };
 }
+
+test('old settings opt out of native completion and new preference is account isolated',async()=>{
+ const storage=memoryStorage();const first=createPlannerStore(storage,'canvas.illinois.edu',77);
+ const old=defaultSettings();delete old.nativeCalendarCompletion;await first.setSettings(old);
+ assert.equal((await first.loadPlanningState()).settings.nativeCalendarCompletion,false);
+ await first.setSettings({...old,nativeCalendarCompletion:true});
+ assert.equal((await createPlannerStore(storage,'canvas.illinois.edu',77).loadPlanningState()).settings.nativeCalendarCompletion,true);
+ assert.equal((await createPlannerStore(storage,'canvas.illinois.edu',88).loadPlanningState()).settings.nativeCalendarCompletion,false);
+ await assert.rejects(first.setSettings({...old,nativeCalendarCompletion:'true'}));
+});
 
 test('plan start and completion survive a new store instance', async () => {
   const storage = memoryStorage();

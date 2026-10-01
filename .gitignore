@@ -4,3 +4,7 @@ node_modules/
 dist/
 .DS_Store
 planning-*-verified.png
+planning-*.jpg
+# Local browser verification images may contain Canvas account/course data.
+docs/superpowers/reviews/*.jpg
+docs/superpowers/reviews/*.png

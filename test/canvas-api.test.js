@@ -103,8 +103,8 @@ test('loadCanvasSnapshot batches 12 contexts including account calendars and ret
       calendarUrls.push(url);
       const contexts = url.searchParams.getAll('context_codes[]');
       assert.ok(contexts.length <= 10);
-      assert.equal(url.searchParams.get('start_date'), '2026-03-01');
-      assert.equal(url.searchParams.get('end_date'), '2027-03-31');
+      assert.equal(url.searchParams.get('start_date'), '2026-05-01');
+      assert.equal(url.searchParams.get('end_date'), '2027-01-31');
       if (url.searchParams.get('type') === 'event') {
         return json([
           ...(contexts.includes('course_1') ? [fixture.event] : []),

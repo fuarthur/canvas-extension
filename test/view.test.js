@@ -46,9 +46,9 @@ function setup(loadSnapshot = async () => ({
   return { dom, host, planner, saved, click };
 }
 
-test('manifest targets only the Illinois Canvas calendar', () => {
+test('planning manifest entry targets only the Illinois Canvas calendar', () => {
   assert.equal(manifest.manifest_version, 3);
-  assert.deepEqual(manifest.content_scripts[0].matches, ['https://canvas.illinois.edu/calendar*']);
+  assert.deepEqual(manifest.content_scripts.find(entry=>entry.js.includes('content.js')).matches, ['https://canvas.illinois.edu/calendar*']);
 });
 
 test('hovering a calendar item highlights every week segment, without highlighting other items in its course', async () => {
@@ -301,8 +301,8 @@ test('Today and day highlight use the Canvas profile time zone', async () => {
 
 test('calendar pressure badges open the deadline list and completion updates locally without fetching',async()=>{
  let calls=0;const {host,planner,click,dom}=setup(async()=>{calls++;return {profile:fixture.profile,contexts:[{code:'course_1',name:'Course 1'}],events:[],assignments:[{...fixture.assignment,assignment:fixture.assignmentDetail}],range:{startDate:'2026-03-01',endDate:'2027-03-31'}};});
- await planner.toggle();const badge=host.shadowRoot.querySelector('[data-pressure-day="2026-09-20"]');assert.ok(badge);assert.equal(badge.textContent,'1');badge.click();assert.match(host.shadowRoot.querySelector('[aria-label="Tasks for 2026-09-20"]').textContent,/Essay/);
- host.shadowRoot.querySelector('[aria-label="Open Essay"]').click();await click('Mark complete');assert.equal(host.shadowRoot.querySelector('[data-pressure-day="2026-09-20"]').textContent,'0');
+ await planner.toggle();const badge=host.shadowRoot.querySelector('[data-pressure-day="2026-09-20"]');assert.ok(badge);assert.equal(badge.textContent,'1 to do');badge.click();assert.match(host.shadowRoot.querySelector('[aria-label="Tasks for 2026-09-20"]').textContent,/Essay/);
+ host.shadowRoot.querySelector('[aria-label="Open Essay"]').click();await click('Mark complete');assert.equal(host.shadowRoot.querySelector('[data-pressure-day="2026-09-20"]').textContent,'No tasks');
  await click('Workload view');assert.match(host.shadowRoot.textContent,/0 tasks/);assert.equal(calls,1);dom.window.close();
 });
 

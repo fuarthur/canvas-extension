@@ -25,8 +25,8 @@ test('multi-select completion is persisted, reversible and protects Canvas compl
  await s.click('Completed tasks');assert.equal(s.root.querySelectorAll('[data-task-row]').length,1);await s.click('Select all filtered tasks');await s.click('Reopen selected tasks');assert.deepEqual((await s.store.load()).completed,{});assert.match(s.root.textContent,/Completed in Canvas/);s.controller.destroy();s.dom.window.close();
 });
 test('bulk effort and planned finish save separately and a failed write retains selection',async()=>{
- const s=await setup();await s.click('Select all filtered tasks');await s.change('Bulk estimate minutes','90');await s.click('Set selected estimates');assert.equal((await s.store.loadPlanningState()).estimates['assignment:1'],90);
- await s.click('Select all filtered tasks');await s.change('Bulk finish date','2026-10-04');await s.change('Bulk finish time','20:00');await s.click('Set selected planned finish');assert.deepEqual((await s.store.loadPlanningState()).targets['assignment:1'],{day:'2026-10-04',time:'20:00'});assert.match(s.root.textContent,/Target is after the deadline/);
+ const s=await setup();await s.click('Select all filtered tasks');await s.click('Edit selected estimates');await s.change('Bulk estimate minutes','90');await s.click('Set selected estimates');assert.equal((await s.store.loadPlanningState()).estimates['assignment:1'],90);
+ await s.click('Select all filtered tasks');await s.click('Edit selected planned finish');await s.change('Bulk finish date','2026-10-04');await s.change('Bulk finish time','20:00');await s.click('Set selected planned finish');assert.deepEqual((await s.store.loadPlanningState()).targets['assignment:1'],{day:'2026-10-04',time:'20:00'});assert.match(s.root.textContent,/Target is after the deadline/);
  await s.click('Select all filtered tasks');s.fail();await s.click('Complete selected tasks');assert.match(s.root.textContent,/Storage is full/);assert.equal(s.root.querySelectorAll('[data-task-select]:checked').length,2);s.controller.destroy();s.dom.window.close();
 });
 test('preferences persist and Chinese UI preserves user titles',async()=>{
@@ -39,6 +39,31 @@ test('range expansion can change just one boundary and global overdue shortcut c
 });
 test('bulk actions commit the displayed input even before a change or blur event',async()=>{
  const s=await setup();await s.click('Select all filtered tasks');
- const effort=s.root.querySelector('[data-control-id="Bulk estimate minutes"]');effort.value='45';effort.dispatchEvent(new s.dom.window.Event('input'));await s.click('Set selected estimates');assert.equal((await s.store.loadPlanningState()).estimates['assignment:1'],45);
- await s.click('Select all filtered tasks');s.root.querySelector('[data-control-id="Bulk finish date"]').value='2026-10-01';s.root.querySelector('[data-control-id="Bulk finish time"]').value='20:00';await s.click('Set selected planned finish');assert.deepEqual((await s.store.loadPlanningState()).targets['assignment:1'],{day:'2026-10-01',time:'20:00'});s.controller.destroy();s.dom.window.close();
+ await s.click('Edit selected estimates');const effort=s.root.querySelector('[data-control-id="Bulk estimate minutes"]');effort.value='45';effort.dispatchEvent(new s.dom.window.Event('input'));await s.click('Set selected estimates');assert.equal((await s.store.loadPlanningState()).estimates['assignment:1'],45);
+ await s.click('Select all filtered tasks');await s.click('Edit selected planned finish');s.root.querySelector('[data-control-id="Bulk finish date"]').value='2026-10-01';s.root.querySelector('[data-control-id="Bulk finish time"]').value='20:00';await s.click('Set selected planned finish');assert.deepEqual((await s.store.loadPlanningState()).targets['assignment:1'],{day:'2026-10-01',time:'20:00'});s.controller.destroy();s.dom.window.close();
+});
+
+test('advanced filters collapse without hiding active restrictions or losing their values',async()=>{
+ const s=await setup();const details=s.root.querySelector('.task-more-filters');assert.ok(details);assert.equal(details.open,false);
+ details.open=true;await s.change('Tasks type','assignment');s.root.querySelector('.task-more-filters').open=false;s.controller.render();
+ assert.equal(s.root.querySelector('.task-more-filters').open,false);assert.match(s.root.querySelector('.active-task-filters').textContent,/Homework/);
+ assert.equal(s.root.querySelector('[data-control-id="Tasks type"]').value,'assignment');assert.equal(s.root.querySelectorAll('[data-task-row]').length,2);
+ await s.click('Reset task filters');assert.equal(s.root.querySelector('.active-task-filters').textContent,'');s.controller.destroy();s.dom.window.close();
+});
+test('batch editors open one at a time and preserve unfinished input across switching',async()=>{
+ const s=await setup();await s.click('Select all filtered tasks');assert.equal(s.root.querySelector('[data-control-id="Bulk estimate minutes"]'),null);
+ await s.click('Edit selected estimates');s.root.querySelector('[data-control-id="Bulk estimate minutes"]').value='75';
+ await s.click('Edit selected planned finish');assert.equal(s.root.querySelector('[data-control-id="Bulk estimate minutes"]'),null);
+ s.root.querySelector('[data-control-id="Bulk finish date"]').value='2026-10-02';await s.click('Edit selected estimates');
+ assert.equal(s.root.querySelector('[data-control-id="Bulk estimate minutes"]').value,'75');await s.click('Edit selected planned finish');
+ assert.equal(s.root.querySelector('[data-control-id="Bulk finish date"]').value,'2026-10-02');
+ s.fail();await s.click('Set selected planned finish');assert.ok(s.root.querySelector('[data-control-id="Bulk finish date"]'));assert.equal(s.root.querySelectorAll('[data-task-select]:checked').length,2);s.controller.destroy();s.dom.window.close();
+});
+
+test('batch status distinguishes successful saves and undo from failures',async()=>{
+ const s=await setup();await s.click('Select all filtered tasks');await s.click('Edit selected estimates');await s.change('Bulk estimate minutes','60');await s.click('Set selected estimates');
+ assert.match(s.root.querySelector('.success')?.textContent||'',/Task changes saved/);
+ await s.click('Undo task changes');assert.match(s.root.querySelector('.success')?.textContent||'',/Task changes undone/);
+ await s.click('Select all filtered tasks');s.fail();await s.click('Complete selected tasks');assert.match(s.root.querySelector('.notice')?.textContent||'',/Storage is full/);assert.equal(s.root.querySelector('.success'),null);
+ s.controller.destroy();s.dom.window.close();
 });

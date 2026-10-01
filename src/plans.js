@@ -1,18 +1,18 @@
 import {dateKey,daysBetween} from './dates.js';
 import {resolveEstimate} from './estimates.js';
-import {validateSchedule} from './planning-settings.js';
+import {validateSchedule,validMinutes,nonSplitThreshold} from './planning-settings.js';
 import {isHistoricalTask} from './tasks.js';
-export function snapshotTask(item,state){return {...structuredClone(item),estimateMinutes:resolveEstimate(item,state).minutes,singleSession:Boolean(state.singleSessions?.[item.key]),completedAtSave:Boolean(item.completed||state.completed?.[item.key])};}
+export function snapshotTask(item,state){const allowSplitting=state.allowSplitting?.[item.key]===true;return {...structuredClone(item),estimateMinutes:resolveEstimate(item,state).minutes,allowSplitting,singleSession:!allowSplitting,completedAtSave:Boolean(item.completed||state.completed?.[item.key])};}
 export function createPlan({id,name,items,state,startDate,endDate,timeZone,now}){
  if(daysBetween(startDate,endDate).length>180||validateSchedule(state.settings.schedule).length)throw new Error('Choose a valid plan range of 1–180 days.');
  const tasks={};for(const item of items){if(item.completed||state.completed?.[item.key]||isHistoricalTask(item,state,{now,timeZone}))continue;const included=item.type==='assignment'?item.endDay<=endDate:item.startDay<=endDate&&item.endDay>=startDate;if(included)tasks[item.key]=snapshotTask(item,state);}
- const stamp=new Date(now).toISOString();return {schemaVersion:1,id,name,revision:0,createdAt:stamp,updatedAt:stamp,timeZone,range:{startDate,endDate},schedule:structuredClone(state.settings.schedule),tasks,segments:[],basisFingerprint:''};
+ const stamp=new Date(now).toISOString();return {schemaVersion:1,id,name,revision:0,createdAt:stamp,updatedAt:stamp,timeZone,range:{startDate,endDate},schedule:structuredClone(state.settings.schedule),nonSplitThresholdMinutes:nonSplitThreshold(state.settings),tasks,segments:[],basisFingerprint:''};
 }
 export function copyPlan(plan,{id,name,now}){const stamp=new Date(now).toISOString();return {...structuredClone(plan),id,name,revision:0,createdAt:stamp,updatedAt:stamp};}
 export function updatePlan(plan,op){
  const p=structuredClone(plan);switch(op.type){
  case 'rename':p.name=op.name;break;
- case 'configure':if(daysBetween(op.range.startDate,op.range.endDate).length>180||validateSchedule(op.schedule).length)throw new Error('Choose a valid range and working capacities.');p.range=structuredClone(op.range);p.schedule=structuredClone(op.schedule);break;
+ case 'configure':if(daysBetween(op.range.startDate,op.range.endDate).length>180||validateSchedule(op.schedule).length||(op.nonSplitThresholdMinutes!=null&&!validMinutes(op.nonSplitThresholdMinutes)))throw new Error('Choose a valid range, working capacities and non-splitting threshold.');p.range=structuredClone(op.range);p.schedule=structuredClone(op.schedule);if(op.nonSplitThresholdMinutes!=null)p.nonSplitThresholdMinutes=op.nonSplitThresholdMinutes;break;
  case 'addTask':p.tasks[op.task.key]=structuredClone(op.task);break;
  case 'removeTask':delete p.tasks[op.itemKey];p.segments=p.segments.filter(s=>s.itemKey!==op.itemKey);break;
  case 'addSegment':if(p.segments.some(s=>s.id===op.segment.id))throw new Error('Duplicate segment.');p.segments.push(structuredClone(op.segment));break;
@@ -27,11 +27,11 @@ export function updatePlan(plan,op){
 export function resolvePlanTasks(plan,{items=[],completed={},state}){
  const live=new Map(items.map(i=>[i.key,i]));const tasks={},changes=[],unknownKeys=[];
  for(const [key,saved]of Object.entries(plan.tasks)){
-  const item=live.get(key);tasks[key]={...saved,completed:Boolean(completed[key]||item?.completed),known:Boolean(item)};
+  const item=live.get(key);tasks[key]={...saved,canvasCompleted:Boolean(item?item.canvasCompleted:saved.canvasCompleted),completed:Boolean(completed[key]||item?.completed),known:Boolean(item)};
   if(!item){unknownKeys.push(key);continue;}
   const changed=['dueAt','unlockAt','manualStartDay','fixedStartAt','fixedEndAt'].filter(field=>(saved[field]??null)!==(item[field]??null));
   if(state&&saved.estimateMinutes!==resolveEstimate(item,state).minutes)changed.push('estimateMinutes');
-  if(state&&saved.singleSession!==Boolean(state.singleSessions?.[key]))changed.push('singleSession');
+  if(state&&Boolean(saved.allowSplitting)!==(state.allowSplitting?.[key]===true))changed.push('allowSplitting');
   if(changed.length)changes.push({itemKey:key,fields:changed});
  }return {tasks,changes,unknownKeys};
 }
@@ -59,15 +59,15 @@ export function comparePlans(plans,facts,{metric='minutes',mode='remaining'}={})
   const resolved=resolvePlanTasks(plan,facts);const unassigned=Object.values(plan.tasks).filter(t=>t.type==='assignment'&&(mode==='saved'?!t.completedAtSave:!resolved.tasks[t.key].completed)).reduce((n,t)=>n+Math.max(0,t.estimateMinutes-(assigned[t.key]||0)),0);
   const conflicts=plan.segments.filter(s=>{const item=facts.items?.find(i=>i.key===s.itemKey)||plan.tasks[s.itemKey];return item?.dueAt&&Date.parse(s.endAt)>Date.parse(item.dueAt);}).length;
   summaries.push({id:plan.id,name:plan.name,totalMinutes:points.reduce((n,p)=>n+p.minutes,0),peakMinutes:Math.max(0,...points.map(p=>p.minutes)),unassignedMinutes:unassigned,deadlineConflicts:conflicts,unknownTasks:resolved.unknownKeys.length});
-  return {id:plan.id,name:plan.name,color:colors[index%colors.length],points:axis.map(day=>byDay.get(day)||{day,tasks:null,minutes:null,itemKeys:[]})};});return {series,summaries,metric,mode};
+  return {id:plan.id,name:plan.name,colorRole:index%colors.length+1,color:colors[index%colors.length],points:axis.map(day=>byDay.get(day)||{day,tasks:null,minutes:null,itemKeys:[]})};});return {series,summaries,metric,mode};
 }
 export function taskUrgency(task,{now,lastEndAt,completed}){
  if(completed||!task.dueAt)return {level:'none',label:'',reason:null};const due=Date.parse(task.dueAt);const left=(due-Date.parse(now))/3600000;
  if(lastEndAt&&Date.parse(lastEndAt)>due)return {level:'red',label:'Deadline conflict',reason:'conflict'};
  if(left<0)return {level:'red',label:'Overdue',reason:'overdue'};
  if(left<=24)return {level:'red',label:`Due in ${Math.max(0,Math.floor(left))}h`,reason:'due'};
- if(lastEndAt&&(due-Date.parse(lastEndAt))/3600000<24)return {level:'yellow',label:'Tight deadline',reason:'tight'};
+ if(lastEndAt&&(due-Date.parse(lastEndAt))/3600000<24){const bufferMinutes=Math.max(0,Math.floor((due-Date.parse(lastEndAt))/60000));const buffer=`${Math.floor(bufferMinutes/60)}h ${bufferMinutes%60}m`;return {level:'yellow',label:'Tight deadline',reason:'tight',bufferMinutes,bufferThresholdMinutes:1440,description:`Only ${buffer} between planned completion and the deadline; less than the recommended 24 hours. This is a buffer warning, not a missed deadline.`};}
  if(left<=72)return {level:'yellow',label:`Due in ${Math.ceil(left/24)}d`,reason:'due'};
  return {level:'none',label:`Due in ${Math.ceil(left/24)}d`,reason:null};
 }
-export function planFingerprint(plan,facts){return JSON.stringify([plan,facts.items?.map(i=>[i.key,i.dueAt,i.unlockAt,i.manualStartDay,i.fixedStartAt,i.fixedEndAt,i.completed,resolveEstimate(i,facts.state||{}).minutes]).sort((a,b)=>a[0].localeCompare(b[0])),facts.completed,facts.state?.singleSessions,facts.loadedRange,facts.state?.settings?.historyFilter]);}
+export function planFingerprint(plan,facts){return JSON.stringify([plan,facts.items?.map(i=>[i.key,i.dueAt,i.unlockAt,i.manualStartDay,i.fixedStartAt,i.fixedEndAt,i.completed,resolveEstimate(i,facts.state||{}).minutes]).sort((a,b)=>a[0].localeCompare(b[0])),facts.completed,facts.state?.allowSplitting,facts.loadedRange,facts.state?.settings?.historyFilter]);}

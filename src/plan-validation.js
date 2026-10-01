@@ -1,5 +1,6 @@
 import {dateKey,zonedDateTime,startOfLocalDay} from './dates.js';import {buildAvailability} from './availability.js';import {resolvePlanTasks} from './plans.js';import {newId} from './ui.js';
 import {isHistoricalTask} from './tasks.js';
+import {canSplitTask} from './planning-settings.js';
 export function taskBounds(task,plan,now){
  const start=startOfLocalDay(plan.range.startDate,plan.timeZone);const manual=task.manualStartDay?startOfLocalDay(task.manualStartDay,plan.timeZone):null;
  return {start:Math.ceil(Math.max(Date.parse(now),Date.parse(start),task.unlockAt?Date.parse(task.unlockAt):-Infinity,manual?Date.parse(manual):-Infinity)/60000)*60000,end:Math.floor(Date.parse(task.dueAt)/60000)*60000};
@@ -27,12 +28,13 @@ export function validatePlan(plan,{items=[],completed={},now,loadedRange,state,h
  }
  pending.sort((a,b)=>a.start-b.start);let latestEnd=-Infinity;for(const segment of pending){if(segment.start<latestEnd)add('OVERLAP','Work blocks overlap.',{segmentId:segment.id});latestEnd=Math.max(latestEnd,segment.end);}
  for(const [day,minutes]of Object.entries(daily))if(minutes>(days.get(day)?.budgetMinutes||0))add('CAPACITY','Planned work exceeds daily capacity.',{day});
- const unassigned={};for(const task of Object.values(plan.tasks)){if(task.type!=='assignment'||resolved.tasks[task.key].completed)continue;const amount=totals[task.key]||0;if(amount>task.estimateMinutes)add('EXCESS','Assigned time exceeds the task estimate.',{itemKey:task.key});if(amount<task.estimateMinutes)unassigned[task.key]=task.estimateMinutes-amount;if(task.singleSession&&(counts[task.key]||0)>1)add('SINGLE_SESSION','This task must fit in one continuous work block.',{itemKey:task.key});const item=current.get(task.key)||task;if(Date.parse(item.dueAt)<Date.parse(now))add('OVERDUE','This task is already overdue.',{itemKey:task.key});}
+ const unassigned={};for(const task of Object.values(plan.tasks)){if(task.type!=='assignment'||resolved.tasks[task.key].completed)continue;const amount=totals[task.key]||0;if(amount>task.estimateMinutes)add('EXCESS','Assigned time exceeds the task estimate.',{itemKey:task.key});if(amount<task.estimateMinutes)unassigned[task.key]=task.estimateMinutes-amount;if(!canSplitTask(task,plan)&&((counts[task.key]||0)>1||(amount>0&&amount<task.estimateMinutes)))add('SINGLE_SESSION','This task must fit in one continuous work block.',{itemKey:task.key});const item=current.get(task.key)||task;if(Date.parse(item.dueAt)<Date.parse(now))add('OVERDUE','This task is already overdue.',{itemKey:task.key});}
  return {valid:issues.length===0,complete:issues.length===0&&Object.keys(unassigned).length===0,issues,unassigned};
 }
 export function suggestSegment(plan,itemKey,{day,minutes,startTime},facts){
  const saved=plan.tasks[itemKey];if(!saved||saved.type!=='assignment'||!Number.isInteger(minutes)||minutes<1)return {segment:null,issues:[{code:'TIME',message:'Choose a task and a whole-minute duration.'}]};
  const assigned=plan.segments.filter(s=>s.itemKey===itemKey).reduce((n,s)=>n+(Date.parse(s.endAt)-Date.parse(s.startAt))/60000,0);
+ if(!canSplitTask(saved,plan)&&(assigned>0||minutes!==saved.estimateMinutes))return {segment:null,issues:[{code:'SINGLE_SESSION',itemKey,message:'This task must fit in one continuous work block.'}]};
  if(assigned+minutes>saved.estimateMinutes)return {segment:null,issues:[{code:'EXCESS',message:'Increase the task estimate before allocating more time.'}]};
  const resolved=resolvePlanTasks(plan,facts);const item=facts.items?.find(i=>i.key===itemKey)||saved;const bounds=taskBounds(item,plan,facts.now);
  const occupied=plan.segments.filter(s=>!resolved.tasks[s.itemKey]?.completed);const available=buildAvailability({range:plan.range,schedule:plan.schedule,timeZone:plan.timeZone,now:facts.now,fixedEvents:fixedFacts(plan,facts.items||[]),lockedSegments:occupied}).days.find(d=>d.day===day);

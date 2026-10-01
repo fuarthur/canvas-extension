@@ -28,7 +28,7 @@ test('Tasks and overdue shortcuts share history filtering, save targets and exte
  assert.match(root.querySelector('.today-summary').textContent,/1 overdue/);await click('View overdue homework');assert.equal(root.querySelectorAll('[data-task-row]').length,1);
  await click('Open Current overdue');await change('Planned finish date','2026-10-01');await change('Planned finish time','20:00');await click('Save planned finish');assert.equal((await store.loadPlanningState()).targets['assignment:1'].time,'20:00');await click('Close details');
  await change('Tasks range start','2026-01-01');await change('Tasks range end','2027-05-31');await click('Load task date range');assert.equal(range.startDate,'2026-01-01');assert.equal(range.endDate,'2027-05-31');assert.equal(calls,2);
- await click('Select all filtered tasks');await change('Bulk estimate minutes','90');await click('Set selected estimates');assert.equal((await store.loadPlanningState()).estimates['assignment:1'],90);
+ await click('Select all filtered tasks');await click('Edit selected estimates');await change('Bulk estimate minutes','90');await click('Set selected estimates');assert.equal((await store.loadPlanningState()).estimates['assignment:1'],90);
  await click('Calendar settings');await change('Historical homework mode','off');await click('Save planning settings');await click('Task list view');assert.equal(root.querySelectorAll('[data-task-row]').length,2);
  planner.destroy();dom.window.close();
 });
@@ -40,9 +40,9 @@ test('saving planning settings keeps the scroll position, open sections and visi
  const field=root.querySelector('[data-control-id="Default estimate minutes"]');field.value='45';field.dispatchEvent(new s.dom.window.Event('change'));
  root.querySelector('.content').scrollTop=720;await s.click('Save planning settings');
  assert.equal(root.querySelector('.content').scrollTop,720);assert.equal(root.querySelector('.planning-settings'),editor);assert.equal(root.querySelector('.schedule-settings').open,true);
- assert.match(root.querySelector('[role="status"]').textContent,/Planning settings saved/);assert.equal(root.querySelector('[data-control-id="Preview title"]').value,'Keep this preview');
+ assert.match(root.querySelector('.planning-settings [role="status"]').textContent,/Planning settings saved/);assert.equal(root.querySelector('[data-control-id="Preview title"]').value,'Keep this preview');
  assert.equal((await s.factory(77).loadPlanningState()).settings.defaultMinutes,45);
- for(const listener of s.listeners)listener({});await settle();assert.equal(root.querySelector('.content').scrollTop,720);assert.match(root.querySelector('[role="status"]').textContent,/Planning settings saved/);
+ for(const listener of s.listeners)listener({});await settle();assert.equal(root.querySelector('.content').scrollTop,720);assert.match(root.querySelector('.planning-settings [role="status"]').textContent,/Planning settings saved/);
  s.planner.destroy();s.dom.window.close();
 });
 
