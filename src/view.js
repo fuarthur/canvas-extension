@@ -67,6 +67,7 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
   const document = host.ownerDocument;
   const root = host.shadowRoot || host.attachShadow({ mode: "open" });
   let open = false;
+  let opener = null;
   let month = initialMonth;
   let snapshot = null;
   let store = null;
@@ -151,9 +152,37 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
     error = null;
     host.remove();
     document.removeEventListener("keydown", onKeyDown);
+    if (opener?.isConnected) opener.focus({ preventScroll: true });
+    opener = null;
+  }
+  function isVisibleControl(node) {
+    if (!node || node.matches(':disabled') || node.getAttribute('aria-disabled') === 'true' ||
+        (node.hasAttribute('tabindex') && node.tabIndex < 0)) return false;
+    for (let parent = node; parent && parent !== host; parent = parent.parentElement) {
+      if (parent.hidden) return false;
+      const style = document.defaultView.getComputedStyle(parent);
+      if (style.display === 'none' || style.visibility === 'hidden') return false;
+      if (parent.tagName === 'DETAILS' && !parent.open) {
+        const summary = [...parent.children].find(child => child.tagName === 'SUMMARY');
+        if (!summary?.contains(node)) return false;
+      }
+    }
+    return true;
   }
   function onKeyDown(event) {
-    if (event.key === "Escape") close();
+    if (event.defaultPrevented) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+    } else if (event.key === 'Tab') {
+      const controls = [...root.querySelectorAll('button, a[href], input:not([type="hidden"]), select, textarea, summary, [tabindex]')].filter(isVisibleControl);
+      const first = controls[0], last = controls.at(-1), active = root.activeElement;
+      if (!controls.includes(active) || (event.shiftKey ? active === first : active === last)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first)?.focus();
+      }
+    }
   }
   function discardIdentity() {
     detailView.reset();
@@ -732,9 +761,10 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
     root.replaceChildren(style, backdrop);
     if (focusId) {
       const target = [...root.querySelectorAll("[data-control-id],[aria-label]")].find((n) => (n.dataset.controlId || n.getAttribute("aria-label")) === focusId);
-      target?.focus({ preventScroll: true });
+      if (isVisibleControl(target)) target.focus({ preventScroll: true });
       if (selection != null && target?.type === "text") target.setSelectionRange(selection, selection);
     }
+    if (!root.activeElement) root.querySelector('[data-control-id="Close planning calendar"]')?.focus({ preventScroll: true });
     body.scrollTop = savedContentScroll;
     const detailPanel = root.querySelector(".detail");
     if (detailPanel) detailPanel.scrollTop = savedDetailScroll;
@@ -745,6 +775,8 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
   }
   async function show(nextMonth) {
     if (open) return;
+    opener = document.activeElement;
+    while (opener?.shadowRoot?.activeElement) opener = opener.shadowRoot.activeElement;
     if (nextMonth) {
       detailView.reset();
       month = nextMonth;

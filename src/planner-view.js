@@ -492,6 +492,7 @@ function createPlannerController(options) {
             compared.delete(draft.id);
           }
           draft = Object.values(archives)[0] ? structuredClone(Object.values(archives)[0]) : null;
+          editing = null;
           mark(false);
           prompt = null;
           draw();

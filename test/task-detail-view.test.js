@@ -128,3 +128,88 @@ test('splitting is opt-in in task details and survives reopening',async()=>{
  toggle=s.control('Allow splitting');toggle.checked=false;toggle.dispatchEvent(new s.dom.window.Event('change'));await settle();
  assert.equal((await s.store.loadPlanningState()).allowSplitting['assignment:1'],undefined);await s.close();
 });
+
+const enterEffort=(s,value,event='input')=>{
+ const input=s.control('Estimated effort minutes');input.value=value;
+ input.dispatchEvent(new s.dom.window.Event(event));
+};
+test('unfinished effort survives storage and appearance refreshes without being saved',async t=>{
+ const s=await setup();t.after(s.close);s.open(1);enterEffort(s,'135');
+ await s.notify();assert.equal(s.control('Estimated effort minutes').value,'135');
+ const theme=(await s.store.loadPlanningState()).theme;await s.store.setTheme({...theme,preset:'dark'});await s.notify();
+ assert.equal(s.control('Estimated effort minutes').value,'135');
+ assert.equal((await s.store.loadPlanningState()).estimates['assignment:1'],undefined);
+ assert.match(s.root.querySelector('[data-effort-status]')?.textContent||'',/unsaved/i);
+});
+test('failed effort saves retain the shown value and offer an accessible retry',async t=>{
+ const s=await setup();t.after(s.close);s.open(1);const save=s.store.setEstimate;
+ s.store.setEstimate=async()=>{throw new Error('Storage is full');};
+ enterEffort(s,'150','change');await settle();
+ assert.equal(s.control('Estimated effort minutes').value,'150');
+ assert.match(s.root.textContent,/Storage is full/);
+ assert.equal(s.root.querySelector('[data-effort-status]')?.getAttribute('role'),'status');
+ assert.match(s.control('Save estimated effort')?.getAttribute('aria-label')||'',/retry/i);
+ s.store.setEstimate=save;await s.click('Save estimated effort');
+ assert.equal((await s.store.loadPlanningState()).estimates['assignment:1'],150);
+ assert.equal(s.control('Estimated effort minutes').value,'150');
+ assert.match(s.root.querySelector('[data-effort-status]')?.textContent||'',/saved/i);
+ assert.doesNotMatch(s.root.textContent,/Storage is full/);
+});
+test('a newer effort draft survives an earlier save and can be saved explicitly',async t=>{
+ const s=await setup();t.after(s.close);s.open(1);const save=s.store.setEstimate;let release;
+ s.store.setEstimate=async(...args)=>{await new Promise(resolve=>{release=resolve;});return save(...args);};
+ enterEffort(s,'90','change');await settle();
+ assert.match(s.root.querySelector('[data-effort-status]')?.textContent||'',/saving/i);
+ assert.equal(s.control('Save estimated effort')?.disabled,true);
+ enterEffort(s,'135');release();await settle();await settle();
+ assert.equal((await s.store.loadPlanningState()).estimates['assignment:1'],90);
+ assert.equal(s.control('Estimated effort minutes').value,'135');
+ assert.match(s.root.querySelector('[data-effort-status]')?.textContent||'',/unsaved/i);
+ s.store.setEstimate=save;await s.click('Save estimated effort');
+ assert.equal((await s.store.loadPlanningState()).estimates['assignment:1'],135);
+ assert.match(s.root.querySelector('[data-effort-status]')?.textContent||'',/saved/i);
+});
+test('effort drafts reset when switching tasks or closing details',async t=>{
+ const s=await setup();t.after(s.close);s.open(1);enterEffort(s,'135');await s.notify();
+ assert.equal(s.control('Estimated effort minutes').value,'135');
+ s.open(2);assert.equal(s.control('Estimated effort minutes').value,'60');
+ enterEffort(s,'150');await s.click('Close details');s.open(2);
+ assert.equal(s.control('Estimated effort minutes').value,'60');
+});
+test('effort drafts never transfer to another Canvas account',async t=>{
+ const s=await setup();t.after(s.close);s.open(1);enterEffort(s,'135');await s.notify();
+ assert.equal(s.control('Estimated effort minutes').value,'135');
+ s.changeAccount();await s.click('Refresh calendar');s.open(1);
+ assert.equal(s.control('Estimated effort minutes').value,'60');
+ assert.doesNotMatch(s.root.querySelector('[data-effort-status]')?.textContent||'',/unsaved|saving|retry/i);
+});
+test('automatic effort replaces an unfinished manual draft only after it saves',async t=>{
+ const s=await setup();t.after(s.close);await s.store.setEstimate('assignment:1',150);await s.notify();s.open(1);
+ enterEffort(s,'135');await s.notify();assert.equal(s.control('Estimated effort minutes').value,'135');
+ await s.click('Use automatic estimate');
+ assert.equal((await s.store.loadPlanningState()).estimates['assignment:1'],undefined);
+ assert.equal(s.control('Estimated effort minutes').value,'60');
+ assert.match(s.root.querySelector('[data-effort-status]')?.textContent||'',/saved/i);
+});
+test('invalid effort remains editable and never persists until corrected',async t=>{
+ const s=await setup();t.after(s.close);s.open(1);enterEffort(s,'0','change');await settle();
+ assert.equal(s.control('Estimated effort minutes').value,'0');
+ assert.equal((await s.store.loadPlanningState()).estimates['assignment:1'],undefined);
+ enterEffort(s,'45');await s.click('Save estimated effort');
+ assert.equal((await s.store.loadPlanningState()).estimates['assignment:1'],45);
+});
+test('automatic effort remains actionable while a blur-triggered manual save finishes',async t=>{
+ const s=await setup();t.after(s.close);s.open(1);const save=s.store.setEstimate;let release;
+ s.store.setEstimate=async(...args)=>{
+  await save(...args);
+  if(args[1]===90)await new Promise(resolve=>{release=resolve;});
+ };
+ enterEffort(s,'90','change');await settle();
+ assert.equal(s.control('Use automatic estimate').disabled,false);
+ await s.click('Use automatic estimate');
+ assert.equal((await s.store.loadPlanningState()).estimates['assignment:1'],undefined);
+ assert.equal(s.control('Estimated effort minutes').value,'60');
+ release();await settle();await settle();
+ assert.equal(s.control('Estimated effort minutes').value,'60');
+ assert.match(s.root.querySelector('[data-effort-status]')?.textContent||'',/saved/i);
+});

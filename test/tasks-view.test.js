@@ -1,8 +1,9 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {JSDOM} from 'jsdom';
 import * as view from '../src/tasks-view.js';import {createPlannerStore} from '../src/storage.js';import {task,memoryStorage} from './helpers/planning.js';import {setLanguage,localizeTree} from '../src/i18n.js';
 const settle=()=>new Promise(r=>setTimeout(r,0));
-async function setup(){
+async function setup({taskPreferences}={}){
  const dom=new JSDOM('<main/>'),document=dom.window.document,area=memoryStorage(),store=createPlannerStore(area,'canvas.illinois.edu',77);
+ if(taskPreferences)await store.setTaskPreferences(taskPreferences);
  const items=[task({title:'Essay'}),task({key:'assignment:2',title:'Homework',endDay:'2026-09-29',dueAt:'2026-09-29T20:00:00-05:00'}),task({key:'assignment:3',title:'Canvas done',canvasCompleted:true,completed:true}),task({key:'assignment:4',title:'Spring',endDay:'2026-05-01',dueAt:'2026-05-01T20:00:00-05:00'})];
  let fail=false,controller;const ranges=[];
  const data=async()=>({items:items.map(i=>({...i,completed:i.canvasCompleted||Boolean((area.entries[`canvas-planner:canvas.illinois.edu:77:completed:${i.key}`]))})),state:{...await store.loadPlanningState(),completed:(await store.load()).completed},contexts:[{code:'course_456',name:'EPSY 456'}],loadedRange:{startDate:'2026-03-01',endDate:'2027-03-31'}});
@@ -32,6 +33,37 @@ test('bulk effort and planned finish save separately and a failed write retains 
 test('preferences persist and Chinese UI preserves user titles',async()=>{
  const s=await setup();await s.change('Tasks sort','estimateDesc');assert.equal((await s.store.loadPlanningState()).taskPreferences.sort,'estimateDesc');
  setLanguage(s.dom.window.document,'zh-CN');localizeTree(s.root);s.controller.render();assert.match(s.root.textContent,/全部任务/);assert.match(s.root.textContent,/Essay/);assert.equal(s.root.querySelector('[data-control-id="Overdue H/W"]').getAttribute('aria-label'),'逾期作业');s.controller.destroy();s.dom.window.close();
+});
+test('an unavailable saved course recovers to all courses without resetting other preferences',async()=>{
+ const s=await setup({taskPreferences:{course:'course_999',query:'Essay',type:'assignment',sort:'titleDesc',group:'course'}});
+ try{
+  await settle();
+  assert.equal(s.root.querySelector('[data-control-id="Tasks course"]').value,'all');
+  assert.deepEqual([...s.root.querySelectorAll('[data-task-row]')].map(n=>n.dataset.taskRow),['assignment:1']);
+  const saved=(await s.store.loadPlanningState()).taskPreferences;
+  assert.equal(saved.course,'all');assert.equal(saved.query,'Essay');assert.equal(saved.type,'assignment');assert.equal(saved.sort,'titleDesc');assert.equal(saved.group,'course');
+ }finally{s.controller.destroy();s.dom.window.close();}
+});
+test('removing the selected course on refresh clears selection and persists all courses',async()=>{
+ const s=await setup();
+ try{
+  await s.change('Tasks course','course_456');await s.change('Tasks sort','estimateDesc');await s.click('Select all filtered tasks');
+  s.controller.setData({items:[task({contexts:['Other'],contextCodes:['course_2']})],contexts:[{code:'course_2',name:'Other'}]});await settle();
+  assert.equal(s.root.querySelector('[data-control-id="Tasks course"]').value,'all');
+  assert.equal(s.root.querySelectorAll('[data-task-row]').length,1);assert.equal(s.root.querySelectorAll('[data-task-select]:checked').length,0);
+  const saved=(await s.store.loadPlanningState()).taskPreferences;assert.equal(saved.course,'all');assert.equal(saved.sort,'estimateDesc');
+ }finally{s.controller.destroy();s.dom.window.close();}
+});
+test('valid saved courses survive refresh and empty contexts safely clear an unavailable course',async()=>{
+ const s=await setup({taskPreferences:{course:'course_456',sort:'titleDesc'}});
+ try{
+  s.controller.setData({contexts:[{code:'course_456',name:'Renamed course'}]});await settle();
+  assert.equal(s.root.querySelector('[data-control-id="Tasks course"]').value,'course_456');
+  assert.equal((await s.store.loadPlanningState()).taskPreferences.course,'course_456');
+  s.controller.setData({contexts:[]},{render:false});s.controller.render();await settle();
+  assert.equal(s.root.querySelector('[data-control-id="Tasks course"]').value,'all');assert.equal(s.root.querySelectorAll('[data-task-row]').length,2);
+  const saved=(await s.store.loadPlanningState()).taskPreferences;assert.equal(saved.course,'all');assert.equal(saved.sort,'titleDesc');
+ }finally{s.controller.destroy();s.dom.window.close();}
 });
 test('range expansion can change just one boundary and global overdue shortcut clears incompatible filters',async()=>{
  const s=await setup();await s.change('Tasks range end','2027-05-31');await s.click('Load task date range');assert.deepEqual(s.ranges,[{startDate:'2026-03-01',endDate:'2027-05-31'}]);

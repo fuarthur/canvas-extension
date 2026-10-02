@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Canvas Planner — fictional quality sandbox</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; color: #213047; background: #e9edf2; font: 14px/1.45 system-ui, sans-serif; }
+  header { padding: 12px 18px; background: #fff; border-bottom: 1px solid #c9d2df; }
+  h1 { margin: 0 0 3px; font-size: 18px; }
+  p { margin: 4px 0; }
+  nav { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+  button, a { font: inherit; }
+  button { padding: 6px 10px; border: 1px solid #b0bbcb; border-radius: 5px; background: white; color: #213047; cursor: pointer; }
+  button:focus-visible, a:focus-visible { outline: 3px solid #2b64c5; outline-offset: 2px; }
+  a { color: #2053a0; }
+  #status { min-height: 21px; }
+  .stage { overflow: auto; padding: 14px; }
+  iframe { display: block; width: 100%; height: 800px; margin: auto; border: 1px solid #b0bbcb; background: white; }
+  .placeholder { padding: 24px; }
+</style>
+<header id="toolbar">
+  <h1>Fictional Canvas Planner sandbox</h1>
+  <p>Local demonstration only. All people, courses, tasks, and plans are invented. Changes live in memory and reset on reload.</p>
+  <nav aria-label="Sandbox controls">
+    <button id="open" type="button">Open planner</button>
+    <button id="reset" type="button">Reset fictional data</button>
+    <button id="fail" type="button">Fail next local save</button>
+    <a href="?width=390">390 px</a>
+    <a href="?width=1280">1280 px</a>
+    <a href="?">Fit window</a>
+  </nav>
+  <p id="status" role="status">Preparing fictional data…</p>
+</header>
+<main id="stage" class="stage"></main>
+<script type="module">
+  const params = new URLSearchParams(location.search);
+  const embedded = params.get('embedded') === '1';
+  if (!embedded) {
+    const frame = document.createElement('iframe');
+    frame.title = 'Fictional Canvas Planner review viewport';
+    frame.src = '?embedded=1';
+    const width = Number(params.get('width'));
+    if (Number.isInteger(width) && width >= 320 && width <= 1920) {
+      frame.style.width = `${width}px`;
+      frame.style.maxWidth = 'none';
+    }
+    document.querySelector('#stage').append(frame);
+    const send = action => frame.contentWindow.postMessage({sandbox: 'canvas-quality', action}, location.origin);
+    document.querySelector('#open').onclick = () => send('open');
+    document.querySelector('#reset').onclick = () => { frame.src = '?embedded=1'; };
+    document.querySelector('#fail').onclick = () => send('fail');
+    window.addEventListener('message', event => {
+      if (event.origin === location.origin && event.source === frame.contentWindow && event.data?.sandbox === 'canvas-quality') {
+        document.querySelector('#status').textContent = event.data.status;
+      }
+    });
+  } else {
+    document.querySelector('#toolbar').remove();
+    document.querySelector('#stage').className = 'placeholder';
+    document.querySelector('#stage').textContent = 'Fictional sandbox — changes stay in memory.';
+    const openPlanner = document.createElement('button');
+    openPlanner.type = 'button';
+    openPlanner.textContent = 'Open fictional planner';
+    document.querySelector('#stage').append(document.createElement('p'), openPlanner);
+    const report = status => parent.postMessage({sandbox: 'canvas-quality', status}, location.origin);
+    window.addEventListener('error', event => report(`Sandbox error: ${event.message}`));
+    window.addEventListener('unhandledrejection', event => report(`Sandbox error: ${event.reason?.message || event.reason}`));
+    try {
+      const [{mountPlanner}, {createPlannerStore}, {createPlanService}, {createPlan}, {normalizeItems}, {defaultSettings}, {generateSchedule}] = await Promise.all([
+        import('/src/view.js'), import('/src/storage.js'), import('/src/plan-service.js'), import('/src/plans.js'),
+        import('/src/model.js'), import('/src/planning-settings.js'), import('/src/scheduler.js')
+      ]);
+      const entries = {}, listeners = new Set();
+      let failNextWrite = false;
+      const notify = changes => setTimeout(() => listeners.forEach(listener => listener(changes)), 0);
+      function checkWrite(keys) {
+        if (failNextWrite && keys.some(key => !key.endsWith(':appearance-account:v1'))) {
+          failNextWrite = false;
+          report('Injected save failure used. Try the same action again to review recovery.');
+          throw new Error('Fictional sandbox: local save failed. Try again.');
+        }
+      }
+      // Chrome-storage-shaped adapter: never reads extension or browser storage.
+      const area = {
+        async get(keys) {
+          if (keys == null) return structuredClone(entries);
+          const names = typeof keys === 'string' ? [keys] : Array.isArray(keys) ? keys : Object.keys(keys);
+          return structuredClone(Object.fromEntries(names.filter(key => key in entries).map(key => [key, entries[key]])));
+        },
+        async set(values) {
+          checkWrite(Object.keys(values));
+          const changes = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, {oldValue: entries[key], newValue: structuredClone(value)}]));
+          Object.assign(entries, structuredClone(values));
+          notify(changes);
+        },
+        async remove(keys) {
+          keys = Array.isArray(keys) ? keys : [keys];
+          checkWrite(keys);
+          const changes = Object.fromEntries(keys.map(key => [key, {oldValue: entries[key]}]));
+          keys.forEach(key => delete entries[key]);
+          notify(changes);
+        }
+      };
+      const userId = 900001, hostname = 'canvas.illinois.edu';
+      const now = () => new Date('2026-10-02T08:00:00-05:00');
+      const store = createPlannerStore(area, hostname, userId);
+      const contexts = [
+        {code: 'course_101', name: 'DEMO 101 · Learning studio'},
+        {code: 'course_202', name: 'DEMO 202 · Design practice'},
+        {code: 'course_303', name: 'DEMO 303 · Research methods'}
+      ];
+      const titles = ['Learning journal', 'Accessible design critique', 'Research proposal: comparing three approaches to community learning', 'Reading reflection', 'Prototype review', 'Peer discussion', 'Methods worksheet', 'Project checkpoint'];
+      const assignments = Array.from({length: 32}, (_, index) => {
+        const due = index === 0 ? '2026-09-30' : `2026-10-${String(2 + index % 27).padStart(2, '0')}`;
+        return {id: `assignment_${index + 1}`, title: `${titles[index % titles.length]} ${Math.floor(index / titles.length) + 1}`,
+          context_code: contexts[index % contexts.length].code,
+          assignment: {due_at: `${due}T23:59:00-05:00`, unlock_at: index % 4 ? '2026-09-28T09:00:00-05:00' : null, user_submitted: index === 5}};
+      });
+      const events = [
+        {id: 'studio', title: 'Fictional studio meeting', context_code: 'course_101', start_at: '2026-10-05T10:00:00-05:00', end_at: '2026-10-05T11:00:00-05:00'},
+        {id: 'review', title: 'Fictional design review', context_code: 'course_202', start_at: '2026-10-07T13:00:00-05:00', end_at: '2026-10-07T14:30:00-05:00'}
+      ];
+      const snapshot = {profile: {id: userId, name: 'Fictional learner', time_zone: 'America/Chicago'}, contexts, events, assignments,
+        selectedCalendars: contexts.map(context => context.code), range: {startDate: '2026-06-01', endDate: '2027-02-28'}};
+      await store.setSettings(defaultSettings());
+      await store.setEstimate('assignment:3', 120);
+      await store.setAllowSplitting('assignment:3', true);
+      await store.setCompleted('assignment:8', true);
+      const state = await store.loadPlanningState(), userState = await store.load();
+      const demoPlan = createPlan({id: 'fictional-plan', name: 'Fictional October study plan', items: normalizeItems(snapshot, userState),
+        state, startDate: '2026-10-02', endDate: '2026-10-16', timeZone: 'America/Chicago', now: now()});
+      demoPlan.segments = [
+        {id: 'demo-block-1', itemKey: 'assignment:2', startAt: '2026-10-02T09:00:00-05:00', endAt: '2026-10-02T10:00:00-05:00', locked: false, order: 0},
+        {id: 'demo-block-2', itemKey: 'assignment:3', startAt: '2026-10-03T10:00:00-05:00', endAt: '2026-10-03T12:00:00-05:00', locked: true, order: 1}
+      ];
+      const service = createPlanService({storageArea: area, now});
+      // This sender is a test input to the local service, not a remote request.
+      const request = message => service.handle({...message, userId}, {url: 'https://canvas.illinois.edu/calendar'});
+      const saved = await request({type: 'PLAN_SAVE', plan: demoPlan, expectedRevision: 0});
+      if (!saved.ok) throw new Error(saved.message);
+      const host = document.createElement('div');
+      const planner = mountPlanner({host, initialMonth: '2026-10', now, storeFactory: () => store, planningStoreFactory: () => store,
+        loadSnapshot: async (_month, options = {}) => {
+          const selected = (await store.load()).selectedCalendars || snapshot.selectedCalendars;
+          return {...structuredClone(snapshot), range: options.range || snapshot.range, selectedCalendars: selected,
+            events: events.filter(event => selected.includes(event.context_code)), assignments: assignments.filter(task => selected.includes(task.context_code))};
+        },
+        subscribeStorage: (_scope, listener) => { listeners.add(listener); return () => listeners.delete(listener); },
+        planClientFactory: () => ({save: (plan, expectedRevision) => request({type: 'PLAN_SAVE', plan, expectedRevision}),
+          remove: (id, expectedRevision) => request({type: 'PLAN_DELETE', id, expectedRevision})}),
+        schedulerClientFactory: () => {
+          let controller;
+          return {run: (input, {onProgress} = {}) => {
+            controller?.abort(); controller = new AbortController();
+            return generateSchedule(input, {signal: controller.signal, onProgress, budgetMs: 2500});
+          }, cancel: () => controller?.abort(), destroy: () => controller?.abort()};
+        }
+      });
+      openPlanner.addEventListener('click', () => planner.show());
+      window.addEventListener('message', async event => {
+        if (event.origin !== location.origin || event.source !== parent || event.data?.sandbox !== 'canvas-quality') return;
+        if (event.data.action === 'open') await planner.show();
+        if (event.data.action === 'fail') {
+          failNextWrite = true;
+          report('Next local save will fail once. Edit a task, plan, or setting to review the error and retry.');
+        }
+      });
+      await planner.show();
+      report('Ready · 32 fictional assignments, 2 events, 1 saved plan · fixed date: October 2, 2026 · no remote requests');
+    } catch (error) {
+      report(`Sandbox failed to start: ${error.message}`);
+    }
+  }
+</script>
+</html>

@@ -22,6 +22,33 @@ test('unsaved exit supports return and discard while failed saves preserve draft
 test('delete confirms the plan name and the last archive returns to empty state',async()=>{
  const s=await setup();await s.click('New plan');s.change('Plan name','Only plan');await s.click('Save plan');await s.click('Delete plan');assert.match(s.root.querySelector('[role="alertdialog"]').textContent,/Only plan/);await s.click('Confirm delete plan');assert.equal(Object.keys((await s.store.loadPlanningState()).plans).length,0);assert.match(s.root.textContent,/Create a plan/);s.dom.window.close();
 });
+async function savedPlansWithArchivedEditor(){
+ const s=await setup([]);await s.click('New plan');s.change('Plan name','Keep this plan');await s.click('Save plan');
+ const kept=structuredClone(Object.values((await s.store.loadPlanningState()).plans)[0]);
+ s.controller.setData({items:[task()]});await s.click('New plan');s.change('Plan name','Delete this plan');await s.click('Arrange Essay');await s.click('Add work block');await s.click('Save plan');
+ const removed=Object.values((await s.store.loadPlanningState()).plans).find(p=>p.id!==kept.id);
+ s.controller.setData({items:[]});await s.click(`Edit block ${removed.segments[0].id}`);
+ return {...s,kept,removed};
+}
+test('deleting a plan closes its archived-task editor and preserves the remaining archive',async()=>{
+ const s=await savedPlansWithArchivedEditor();
+ try{
+  assert.ok(s.root.querySelector('.arrange-editor'));await s.click('Delete plan');await s.click('Confirm delete plan');
+  assert.equal(s.root.querySelector('[data-control-id="Plan name"]').value,'Keep this plan');assert.equal(s.root.querySelector('.arrange-editor'),null);
+  assert.ok(s.root.querySelector('.task-pool'));assert.ok(s.root.querySelector('.week-scroll'));
+  const plans=(await s.store.loadPlanningState()).plans;assert.deepEqual(plans,{[s.kept.id]:s.kept});
+ }finally{s.controller.destroy();s.dom.window.close();}
+});
+test('failed plan deletion retains the active plan and unfinished archived-task editor',async()=>{
+ const s=await savedPlansWithArchivedEditor();
+ try{
+  s.change('Work start time','12:15');s.options.planClient.remove=async()=>({ok:false,message:'Could not delete this plan.'});
+  await s.click('Delete plan');await s.click('Confirm delete plan');
+  assert.equal(s.root.querySelector('[data-control-id="Plan name"]').value,'Delete this plan');assert.ok(s.root.querySelector('.arrange-editor'));
+  assert.equal(s.root.querySelector('[data-control-id="Work start time"]').value,'12:15');assert.match(s.root.textContent,/Could not delete this plan/);
+  const plans=(await s.store.loadPlanningState()).plans;assert.deepEqual(plans,{[s.kept.id]:s.kept,[s.removed.id]:s.removed});
+ }finally{s.controller.destroy();s.dom.window.close();}
+});
 
 test('generated previews are separate from drafts until accepted and stale estimates prevent applying',async()=>{
  const {generateSchedule}=await import('../src/scheduler.js');const s=await setup();let delayed,release;const client={run:async input=>{const result=await generateSchedule(input);if(delayed)await new Promise(r=>release=r);return result;},cancel(){},destroy(){}};

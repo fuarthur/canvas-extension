@@ -37,6 +37,12 @@ function createTasksController(options) {
     savePreferences();
     draw();
   }
+  function reconcileCourse() {
+    if (preferences.course === "all" || data.contexts?.some((context) => context.code === preferences.course)) return;
+    preferences = { ...preferences, course: "all" };
+    selected.clear();
+    savePreferences();
+  }
   async function apply(patch) {
     if (busy) return;
     let keys = [...selected];
@@ -178,6 +184,7 @@ function createTasksController(options) {
   }
   function draw() {
     if (destroyed) return;
+    reconcileCourse();
     const active = root.getRootNode().activeElement || document.activeElement;
     const focusId = root.contains(active) ? active.dataset?.controlId : null, cursor = active?.selectionStart;
     captureBulkInputs();
@@ -334,6 +341,7 @@ function createTasksController(options) {
     return root;
   }, setData(next, { render = true } = {}) {
     data = { ...data, ...next };
+    reconcileCourse();
     if (render) draw();
   }, showPreset(preset) {
     preferences = { ...defaultTaskPreferences(), sort: preferences.sort, group: preferences.group, preset, status: preset === "completed" ? "completed" : "remaining" };

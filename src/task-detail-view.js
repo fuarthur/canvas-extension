@@ -1,5 +1,5 @@
 import { ui } from "./ui.js";
-import { setLabel, translate, intlLocale } from "./i18n.js";
+import { setLabel, setText, translate, intlLocale } from "./i18n.js";
 import { validDay } from "./dates.js";
 import { resolveEstimate } from "./estimates.js";
 import { targetInstant } from "./tasks.js";
@@ -17,11 +17,18 @@ function createTaskDetailView(options) {
   const { el, button, input, field } = ui(document);
   let key = null, panel = null, target = null, targetDirty = false, currentItem = null;
   let baseline = null, generation = 0, notice = "", planningOpen = false;
+  let effortDraft = null, effortDirty = false, effortRevision = 0, effortAttempt = 0;
+  let effortSaving = false, effortStatus = "", retryAutomatic = false;
   function reset() {
     key = currentItem = null;
     panel = null;
     target = baseline = null;
     targetDirty = false;
+    effortDraft = null;
+    effortDirty = effortSaving = retryAutomatic = false;
+    effortRevision = 0;
+    effortAttempt = 0;
+    effortStatus = "";
     notice = "";
     planningOpen = false;
     generation++;
@@ -34,10 +41,20 @@ function createTaskDetailView(options) {
     if (day !== baseline?.day || time !== baseline?.time) targetDirty = true;
     target = { day, time };
   }
+  function captureEffort() {
+    const input = panel?.querySelector('[data-control-id="Estimated effort minutes"]');
+    if (!input || input.value === effortDraft) return;
+    effortDraft = input.value;
+    effortDirty = true;
+    effortRevision++;
+    retryAutomatic = false;
+    if (!effortSaving) effortStatus = "dirty";
+  }
   function render(item) {
     if (key !== item.key) reset();
     const scrollTop = panel?.scrollTop || 0;
     captureTarget();
+    captureEffort();
     if (panel) planningOpen = panel.querySelector(".detail-planning-options")?.open || false;
     key = item.key;
     currentItem = item;
@@ -53,8 +70,11 @@ function createTaskDetailView(options) {
       if (generation !== currentGeneration || key !== item.key) return;
       const previous = panel;
       const top = previous.scrollTop;
+      const focused = previous.getRootNode().activeElement || document.activeElement;
+      const focusId = previous.contains(focused) ? focused?.dataset?.controlId : null;
       previous.replaceWith(render(currentItem));
       panel.scrollTop = top;
+      if (focusId) [...panel.querySelectorAll('[data-control-id]')].find(node => node.dataset.controlId === focusId)?.focus({ preventScroll: true });
     };
     async function run(operation) {
       if (generation !== currentGeneration) return false;
@@ -110,12 +130,63 @@ function createTaskDetailView(options) {
       if (item.needsStart) planningOptions.append(el("p", "hint", "No Canvas open date; choose when you plan to start."));
     }
     const estimate = resolveEstimate(item, planningState);
-    const minutes = input("Estimated effort minutes", estimate.minutes, "number");
+    if (!effortDirty) effortDraft = String(estimate.minutes);
+    const minutes = input("Estimated effort minutes", effortDraft, "number");
     minutes.min = "1";
     minutes.max = "1440";
     minutes.step = "1";
-    minutes.addEventListener("change", () => run(() => options.onEstimate(item.key, Number(minutes.value))));
-    panel.append(field("Estimated effort (minutes)", minutes), el("p", "hint", estimate.label), button("Use automatic estimate", () => run(() => options.onEstimate(item.key, null)), "text-button", "Use rule / default"));
+    const effortFeedback = el("p", "hint");
+    effortFeedback.dataset.effortStatus = "";
+    effortFeedback.setAttribute("role", "status");
+    effortFeedback.setAttribute("aria-live", "polite");
+    const saveEffortButton = button("Save estimated effort", () => {
+      captureEffort();
+      return saveEffort(retryAutomatic ? null : Number(effortDraft));
+    }, "control", "Save effort");
+    const automaticEffort = button("Use automatic estimate", () => saveEffort(null), "text-button", "Use rule / default");
+    function updateEffortFeedback() {
+      const failed = effortStatus === "error";
+      const retryLabel = retryAutomatic ? "Retry automatic estimate" : "Retry effort save";
+      setLabel(saveEffortButton, failed ? retryLabel : "Save estimated effort");
+      setText(saveEffortButton, effortSaving ? "Saving…" : failed ? retryLabel : "Save effort");
+      saveEffortButton.disabled = effortSaving || !effortDirty;
+      automaticEffort.disabled = effortSaving && retryAutomatic;
+      const message = { dirty: "Unsaved effort changes.", saving: "Saving effort…", saved: "Effort saved.", error: retryAutomatic ? "Automatic estimate was not saved. Try again." : "Effort was not saved. Retry your change." }[effortStatus] || "";
+      setText(effortFeedback, message);
+      effortFeedback.hidden = !message;
+      effortFeedback.className = failed ? "notice" : effortStatus === "saved" ? "success" : "hint";
+    }
+    async function saveEffort(value) {
+      if (generation !== currentGeneration || effortSaving && (value !== null || retryAutomatic)) return;
+      captureEffort();
+      const sentRevision = effortRevision, attempt = ++effortAttempt;
+      effortDirty = effortSaving = true;
+      effortStatus = "saving";
+      retryAutomatic = value === null;
+      updateEffortFeedback();
+      const success = await run(() => options.onEstimate(item.key, value));
+      if (generation !== currentGeneration || key !== item.key || attempt !== effortAttempt) return;
+      captureEffort();
+      effortSaving = false;
+      if (success === false) effortStatus = "error";
+      else if (effortRevision === sentRevision) {
+        effortDirty = false;
+        effortStatus = "saved";
+      } else {
+        effortStatus = "dirty";
+        retryAutomatic = false;
+      }
+      redraw();
+    }
+    minutes.addEventListener("input", () => {
+      captureEffort();
+      updateEffortFeedback();
+    });
+    minutes.addEventListener("change", () => saveEffort(Number(minutes.value)));
+    const effortActions = el("div", "view-tools");
+    effortActions.append(saveEffortButton, automaticEffort);
+    updateEffortFeedback();
+    panel.append(field("Estimated effort (minutes)", minutes), el("p", "hint", estimate.label), effortActions, effortFeedback);
     const date = input("Planned finish date", target.day, "date");
     const time = input("Planned finish time", target.time, "time");
     for (const node of [date, time]) node.addEventListener("input", () => {
