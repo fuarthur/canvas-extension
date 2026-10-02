@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Canvas Planning Calendar",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "description": "Task agenda, bulk planning, workload charts and balanced study plans for Illinois Canvas.",
   "permissions": ["storage"],
   "host_permissions": ["https://canvas.illinois.edu/*"],
