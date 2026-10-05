@@ -253,7 +253,7 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
       unsubscribeStorage = subscribeStorage(scope, (changes) => {
         if (!open || String(snapshot?.profile.id) !== String(scope.userId)) return;
         const reminderKey=`canvas-planner:${scope.hostname}:${scope.userId}:reminders:v1`;
-        if(changes&&Object.keys(changes).every(key=>key===reminderKey)){void settingsEditor?.refreshReminderStatus();return;}
+        if(changes&&Object.keys(changes).length&&Object.keys(changes).every(key=>key===reminderKey)){void settingsEditor?.refreshReminderStatus();return;}
         const calendarKey = `canvas-planner:${scope.hostname}:${scope.userId}:calendars`;
         if (changes?.[calendarKey]) load(true);
         else refreshLocal().catch((cause) => {

@@ -40,9 +40,9 @@ test('saving planning settings keeps the scroll position, open sections and visi
  const field=root.querySelector('[data-control-id="Default estimate minutes"]');field.value='45';field.dispatchEvent(new s.dom.window.Event('change'));
  root.querySelector('.content').scrollTop=720;await s.click('Save planning settings');
  assert.equal(root.querySelector('.content').scrollTop,720);assert.equal(root.querySelector('.planning-settings'),editor);assert.equal(root.querySelector('.schedule-settings').open,true);
- assert.match(root.querySelector('.planning-settings [role="status"]').textContent,/Planning settings saved/);assert.equal(root.querySelector('[data-control-id="Preview title"]').value,'Keep this preview');
+ assert.match(root.querySelector('[data-planning-settings-status]').textContent,/Planning settings saved/);assert.equal(root.querySelector('[data-control-id="Preview title"]').value,'Keep this preview');
  assert.equal((await s.factory(77).loadPlanningState()).settings.defaultMinutes,45);
- for(const listener of s.listeners)listener({});await settle();assert.equal(root.querySelector('.content').scrollTop,720);assert.match(root.querySelector('.planning-settings [role="status"]').textContent,/Planning settings saved/);
+ for(const listener of s.listeners)listener({});await settle();assert.equal(root.querySelector('.content').scrollTop,720);assert.match(root.querySelector('[data-planning-settings-status]').textContent,/Planning settings saved/);
  s.planner.destroy();s.dom.window.close();
 });
 

@@ -116,6 +116,7 @@ function renderPlanningSettings({ document, state, contexts, onSave, reminderCli
     el('p','hint','Calendar data is cached on this device for 24 hours and shared across tabs. After 5 minutes, cached events appear first while Canvas updates in the background. Refresh checks immediately.'));
   panel.append(loading);updateRange();
   const notice = el("p", "notice");
+  notice.dataset.planningSettingsStatus='';
   notice.setAttribute("role", "status");
   notice.setAttribute("aria-live", "polite");
   panel.append(el("h2", "", "Estimates & pressure"), el("p", "hint", "Manual estimates override the first matching enabled rule, then the default. Saved plans keep their own estimates."));
