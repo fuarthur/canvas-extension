@@ -1,4 +1,4 @@
-import {validDay,daysBetween} from './dates.js';
+import {validDay,daysBetween,dateKey,addDays} from './dates.js';
 import {calendarLoadingRange,normalizeCalendarLoading,visibleCalendarRange} from './calendar-loading.js';
 import {createCalendarCache,SNAPSHOT_RETENTION_MS} from './calendar-cache.js';
 const ORIGIN = 'https://canvas.illinois.edu';
@@ -62,6 +62,21 @@ async function getJson(fetchImpl, url) {
     throw new CanvasApiError('DATA', 'Canvas returned invalid JSON.');
   }
   return { body, link: response.headers.get('link') };
+}
+
+export async function fetchCanvasProfile(fetchImpl=fetch){
+ const profile=(await getJson(fetchImpl,`${ORIGIN}/api/v1/users/self/profile`)).body;
+ if(!profile||!/^\d+$/.test(String(profile.id)))throw new CanvasApiError('DATA','Canvas did not identify the signed-in user.');
+ return profile;
+}
+
+export async function loadCanvasReminderSnapshot({fetchImpl=fetch,profile,selectedCalendars,now=Date.now,maxLeadMinutes,cache=new Map()}){
+ if(!/^\d+$/.test(String(profile?.id))||!Number.isInteger(maxLeadMinutes)||maxLeadMinutes<1||maxLeadMinutes>43200)throw new CanvasApiError('DATA','Invalid reminder data range.');
+ let startDate,endDate;
+ try{new Intl.DateTimeFormat('en',{timeZone:profile.time_zone});startDate=dateKey(now(),profile.time_zone);endDate=addDays(dateKey(now()+maxLeadMinutes*60000,profile.time_zone),1);}
+ catch{throw new CanvasApiError('DATA','Invalid Canvas account time zone.');}
+ if(!validDay(startDate)||!validDay(endDate))throw new CanvasApiError('DATA','Invalid reminder data range.');
+ return fetchSnapshotData({fetchImpl,profile,userId:String(profile.id),savedSelection:selectedCalendars,cache,now,retryUnavailable:true,range:{startDate,endDate},types:['assignment']});
 }
 
 function nextLink(link) {
@@ -217,7 +232,7 @@ export async function loadCanvasSnapshot({ fetchImpl = fetch, month, readSelecti
   }
 }
 
-async function fetchSnapshotData({fetchImpl, profile, userId, savedSelection, cache, now, retryUnavailable, range}) {
+async function fetchSnapshotData({fetchImpl, profile, userId, savedSelection, cache, now, retryUnavailable, range,types=['event','assignment']}) {
   let cached = cache.get(userId);
   if (!cached || cached.expires <= now() || retryUnavailable) {
     cached = { expires: now() + CACHE_MS, denied: { event: new Set(), assignment: new Set() }, directory: Promise.all([
@@ -241,7 +256,7 @@ async function fetchSnapshotData({fetchImpl, profile, userId, savedSelection, ca
   const uniqueContexts = [...new Map(contexts.map(context => [context.code, context])).values()];
   const selectedCalendars = uniqueContexts.map(context => context.code).filter(code => !Array.isArray(savedSelection) || savedSelection.includes(code));
   const requests = [];
-  for (const type of ['event', 'assignment']) {
+  for (const type of types) {
     const readableCodes = selectedCalendars.filter(code => !cached.denied[type].has(code));
     for (const batch of chunks(readableCodes, 10)) {
       requests.push(fetchCalendarBatch(fetchImpl, type, batch, range).then(result => ({ type, ...result })));
@@ -255,7 +270,7 @@ async function fetchSnapshotData({fetchImpl, profile, userId, savedSelection, ca
     throw error;
   }
   for (const result of results) for (const code of result.denied) cached.denied[result.type].add(code);
-  const denied = new Set(selectedCalendars.filter(code => cached.denied.event.has(code) || cached.denied.assignment.has(code)));
+  const denied = new Set(selectedCalendars.filter(code => types.some(type=>cached.denied[type].has(code))));
   if (selectedCalendars.length && !results.some(result => result.readable)) {
     const error = new CanvasApiError('FORBIDDEN', 'Canvas denied access to all selected calendars. Choose other calendars in Settings or retry access.');
     error.snapshot = { profile, contexts: uniqueContexts, selectedCalendars, unavailableCalendars: [...denied], events: [], assignments: [], range, warnings: [] };
