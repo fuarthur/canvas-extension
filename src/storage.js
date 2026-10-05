@@ -4,6 +4,7 @@ import {appearanceAccountKey,loadInitialAppearance,normalizeThemeScope,validThem
 import {defaultSettings,validateSettings,validateSchedule,validMinutes} from './planning-settings.js';
 import {validDay,daysBetween} from './dates.js';
 import {validTarget,defaultTaskPreferences,validateTaskPreferences} from './tasks.js';
+import {defaultReminderSettings,validateReminderSettings} from './reminder-settings.js';
 const taskQueues=new WeakMap();
 // Live content pages share Canvas's origin, so Web Locks serialize their
 // read/compare/write transactions. The fallback keeps store instances ordered
@@ -54,7 +55,11 @@ export function createPlannerStore(storageArea, hostname, userId) {
       const entries = await storageArea.get(null);
       const state = {settings:defaultSettings(),estimates:{},targets:{},taskPreferences:defaultTaskPreferences(),singleSessions:{},allowSplitting:{},plans:{},warnings:[]};
       if(entries[`${prefix}settings:v1`] != null) {
-        const checked=validateSettings(entries[`${prefix}settings:v1`]);
+        let saved=entries[`${prefix}settings:v1`];
+        if(saved?.reminders!=null&&!validateReminderSettings(saved.reminders).value){
+          saved={...saved,reminders:defaultReminderSettings()};state.warnings.push('Saved reminder settings are invalid; reminders are off.');
+        }
+        const checked=validateSettings(saved);
         if(checked.value)state.settings=checked.value;else state.warnings.push('Saved planning settings are invalid; using defaults.');
       }
       state.settings.language=validLanguage(entries[`${prefix}language`])?entries[`${prefix}language`]:'en';

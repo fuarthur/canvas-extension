@@ -1,10 +1,11 @@
 import {validDay} from './dates.js';
 import {defaultHistoryFilter,validHistoryFilter} from './tasks.js';
 import {defaultCalendarLoading,validCalendarLoading,normalizeCalendarLoading} from './calendar-loading.js';
+import {defaultReminderSettings,validateReminderSettings} from './reminder-settings.js';
 export const DEFAULT_NON_SPLIT_THRESHOLD_MINUTES=60;
 export const DEFAULT_BUFFER_MINUTES=15;
 export const scheduleBufferMinutes=schedule=>schedule.bufferMinutes??DEFAULT_BUFFER_MINUTES;
-export function defaultSettings(){return {schemaVersion:1,language:'en',nativeCalendarCompletion:false,calendarLoading:defaultCalendarLoading(),historyFilter:defaultHistoryFilter(),defaultMinutes:60,nonSplitThresholdMinutes:DEFAULT_NON_SPLIT_THRESHOLD_MINUTES,yellowFrom:3,redFrom:6,rules:[],schedule:{weekdays:Array.from({length:7},()=>({start:'09:00',end:'21:00',maxMinutes:240})),exceptions:{},horizonDays:28,bufferMinutes:DEFAULT_BUFFER_MINUTES}};}
+export function defaultSettings(){return {schemaVersion:1,language:'en',nativeCalendarCompletion:false,reminders:defaultReminderSettings(),calendarLoading:defaultCalendarLoading(),historyFilter:defaultHistoryFilter(),defaultMinutes:60,nonSplitThresholdMinutes:DEFAULT_NON_SPLIT_THRESHOLD_MINUTES,yellowFrom:3,redFrom:6,rules:[],schedule:{weekdays:Array.from({length:7},()=>({start:'09:00',end:'21:00',maxMinutes:240})),exceptions:{},horizonDays:28,bufferMinutes:DEFAULT_BUFFER_MINUTES}};}
 export const validMinutes=value=>Number.isInteger(value)&&value>=1&&value<=1440;
 export const nonSplitThreshold=plan=>plan.nonSplitThresholdMinutes??DEFAULT_NON_SPLIT_THRESHOLD_MINUTES;
 // Legacy singleSession=false was an implicit default, not consent to split.
@@ -21,6 +22,7 @@ export function validateSchedule(schedule){
 }
 export function validateSettings(input){
  const errors=[];
+ const reminders=validateReminderSettings(input?.reminders??defaultReminderSettings());errors.push(...reminders.errors);
  if(input?.schemaVersion!==1)errors.push('Unsupported settings version.');
  if(input?.nativeCalendarCompletion!=null&&typeof input.nativeCalendarCompletion!=='boolean')errors.push('Choose whether to show extension completion on Canvas calendar.');
  if(input?.historyFilter!=null&&!validHistoryFilter(input.historyFilter))errors.push('Choose a history mode and 1–24 months.');
@@ -34,5 +36,5 @@ export function validateSettings(input){
   ids.add(rule?.id);
  }}
  errors.push(...validateSchedule(input?.schedule));
- return {value:errors.length?null:{...structuredClone(input),schedule:{...structuredClone(input.schedule),bufferMinutes:scheduleBufferMinutes(input.schedule)},nonSplitThresholdMinutes:nonSplitThreshold(input),nativeCalendarCompletion:input.nativeCalendarCompletion===true,calendarLoading:normalizeCalendarLoading(input.calendarLoading),historyFilter:input.historyFilter||defaultHistoryFilter()},errors};
+ return {value:errors.length?null:{...structuredClone(input),reminders:reminders.value,schedule:{...structuredClone(input.schedule),bufferMinutes:scheduleBufferMinutes(input.schedule)},nonSplitThresholdMinutes:nonSplitThreshold(input),nativeCalendarCompletion:input.nativeCalendarCompletion===true,calendarLoading:normalizeCalendarLoading(input.calendarLoading),historyFilter:input.historyFilter||defaultHistoryFilter()},errors};
 }
