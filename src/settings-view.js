@@ -5,6 +5,8 @@ import { resolveEstimate } from "./estimates.js";
 import { defaultHistoryFilter } from "./tasks.js";
 import {normalizeCalendarLoading,validCalendarLoading,calendarLoadingRange} from './calendar-loading.js';
 import {dateKey} from './dates.js';
+import {createReminderSettingsEditor} from './reminder-settings-view.js';
+import {normalizeReminderSettings} from './reminder-settings.js';
 function renderScheduleEditor({ document, schedule, onChange }) {
   const { el, input, field, button } = ui(document);
   const panel = el("section", "schedule-editor");
@@ -61,11 +63,16 @@ function renderScheduleEditor({ document, schedule, onChange }) {
   drawExceptions();
   return panel;
 }
-function renderPlanningSettings({ document, state, contexts, onSave, currentMonth=dateKey(new Date()).slice(0,7) }) {
+function renderPlanningSettings({ document, state, contexts, onSave, reminderClient, currentMonth=dateKey(new Date()).slice(0,7) }) {
   const { el, input, field, button, select } = ui(document);
   const draft = structuredClone(state.settings);
   draft.nonSplitThresholdMinutes=nonSplitThreshold(draft);
   const panel = el("section", "planning-settings");
+  draft.reminders=normalizeReminderSettings(draft.reminders);
+  const reminders=createReminderSettingsEditor({document,value:draft.reminders,client:reminderClient,onChange:value=>{draft.reminders=value;}});
+  panel.append(reminders.element);
+  panel.refreshReminderStatus=reminders.refreshStatus;
+  panel.dispose=reminders.dispose;
   const nativeCalendar = el("section", "native-calendar-settings settings-section");
   const nativeCompletion = input("Show extension completion on Canvas calendar", "", "checkbox");
   nativeCompletion.checked = draft.nativeCalendarCompletion === true;
@@ -228,15 +235,20 @@ function renderPlanningSettings({ document, state, contexts, onSave, currentMont
       return;
     }
     save.disabled = true;
+    reminders.setBusy(true);
     try {
       await onSave(result.value);
+      const merged=draft.reminders.leadMinutes.length!==result.value.reminders.leadMinutes.length;
+      draft.reminders=structuredClone(result.value.reminders);reminders.setValue(draft.reminders);
       notice.className = "success";
-      setText(notice, "Planning settings saved.");
+      setText(notice, merged?["Planning settings saved.","Duplicate times were merged."]:"Planning settings saved.");
+      void reminders.refreshStatus();
     } catch (error) {
       notice.className = "notice";
       setText(notice, error.message || "Could not save settings.");
     } finally {
       save.disabled = false;
+      reminders.setBusy(false);
     }
   }, "control primary");
   panel.append(save);

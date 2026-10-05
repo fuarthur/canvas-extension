@@ -63,7 +63,7 @@ function shortContext(name) {
   const courseCode = String(name || "").match(/\b[A-Z]{2,6}\s*\d{3}\b/);
   return courseCode ? courseCode[0] : String(name || "Personal").slice(0, 18);
 }
-function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, planClientFactory, schedulerClientFactory, subscribeStorage, planningStoreFactory, initialMonth, now = () => /* @__PURE__ */ new Date() }) {
+function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, planClientFactory, reminderClientFactory, schedulerClientFactory, subscribeStorage, planningStoreFactory, initialMonth, now = () => /* @__PURE__ */ new Date() }) {
   const document = host.ownerDocument;
   const root = host.shadowRoot || host.attachShadow({ mode: "open" });
   let open = false;
@@ -95,6 +95,7 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
   const todayDay = () => dateKey(typeof now === "function" ? now() : now, snapshot?.profile?.time_zone);
   const { el } = ui(document);
   let settingsEditor = null, settingsEditorKey = "";
+  let reminderClient = null, reminderUserId = null;
   let themeEditor = null, themeEditorUserId = null;
   const systemTheme = document.defaultView.matchMedia?.("(prefers-color-scheme: dark)");
   const applyAppearance = () => applyTheme(host, planningState.theme, systemTheme?.matches);
@@ -141,6 +142,7 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
     tasksUserId = null;
     unsubscribeStorage?.();
     unsubscribeStorage = null;
+    settingsEditor?.dispose();settingsEditor=null;settingsEditorKey='';
     localVersion++;
     detailView.reset();
     open = false;
@@ -185,6 +187,7 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
     }
   }
   function discardIdentity() {
+    settingsEditor?.dispose();settingsEditor=null;settingsEditorKey='';reminderClient=null;reminderUserId=null;
     detailView.reset();
     snapshot = store = planningStore = null;
     userState = { starts: {}, completed: {} };
@@ -240,10 +243,17 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
     // Best-effort loading appearance for the next page; failure cannot block calendar access.
     planningStore.rememberAppearance?.().catch(() => {});
     draftSelection = new Set(snapshot.selectedCalendars || userState.selectedCalendars || snapshot.contexts.map((c) => c.code));
+    if(reminderClientFactory&&String(reminderUserId)!==String(snapshot.profile.id)){
+      reminderUserId=snapshot.profile.id;reminderClient=reminderClientFactory(reminderUserId);
+    }
+    const seenClient=reminderClient,seenSelection=[...draftSelection];
+    Promise.resolve().then(()=>seenClient?.accountSeen({selectedCalendars:seenSelection})).catch(()=>{});
     if (subscribeStorage) {
       const scope = { hostname: document.location.hostname, userId: snapshot.profile.id };
       unsubscribeStorage = subscribeStorage(scope, (changes) => {
         if (!open || String(snapshot?.profile.id) !== String(scope.userId)) return;
+        const reminderKey=`canvas-planner:${scope.hostname}:${scope.userId}:reminders:v1`;
+        if(changes&&Object.keys(changes).every(key=>key===reminderKey)){void settingsEditor?.refreshReminderStatus();return;}
         const calendarKey = `canvas-planner:${scope.hostname}:${scope.userId}:calendars`;
         if (changes?.[calendarKey]) load(true);
         else refreshLocal().catch((cause) => {
@@ -529,16 +539,20 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
     const settingsSignature = (value) => JSON.stringify([snapshot.profile.id, month, snapshot.contexts, { ...value, language: void 0 }]);
     const signature = settingsSignature(planningState.settings);
     if (!settingsEditor || settingsEditorKey !== signature) {
+      settingsEditor?.dispose();
       settingsEditorKey = signature;
-      settingsEditor = renderPlanningSettings({ document, state: planningState, contexts: snapshot.contexts, currentMonth:month, onSave: async (settings2) => {
+      const capturedStore=planningStore,capturedUser=snapshot.profile.id;
+      settingsEditor = renderPlanningSettings({ document, state: planningState, contexts: snapshot.contexts, currentMonth:month, reminderClient, onSave: async (settings2) => {
+        if(!open||planningStore!==capturedStore||String(snapshot?.profile.id)!==String(capturedUser))throw new Error('Canvas account changed. Open the planner again.');
         const previousKey = settingsEditorKey;
         /* Keep this form when the storage notification installs our own save. */
         settingsEditorKey = settingsSignature(settings2);
         try {
-          await planningStore.setSettings(settings2);
+          await capturedStore.setSettings(settings2);
+          if(!open||planningStore!==capturedStore)return;
           await refreshLocal();
         } catch (cause) {
-          settingsEditorKey = previousKey;
+          if(planningStore===capturedStore)settingsEditorKey = previousKey;
           throw cause;
         }
       } });

@@ -1,6 +1,7 @@
 import { createCanvasLoader } from './canvas-api.js';
 import {createSchedulerClient} from './scheduler-client.js';
 import {createPlanClient} from './plan-client.js';
+import {createReminderClient} from './reminder-client.js';
 import { createPlannerStore, loadInitialTheme } from './storage.js';
 import { mountPlanner, mountCalendarEntry, monthFromCalendarHash, nativeCalendarSelection } from './view.js';
 import {mountNativeCalendarCompletion} from './native-calendar.js';
@@ -36,6 +37,7 @@ if (location.pathname.startsWith('/calendar')) {
     subscribeStorage,
     schedulerClientFactory:()=>createSchedulerClient({connect:options=>chrome.runtime.connect(options)}),
     planClientFactory:userId=>createPlanClient({userId,sendMessage:message=>chrome.runtime.sendMessage(message)}),
+    reminderClientFactory:userId=>createReminderClient({userId,sendMessage:message=>chrome.runtime.sendMessage(message)}),
     initialMonth: monthFromCalendarHash(location.hash, new Date())
   });
   mountCalendarEntry({ document, onOpen: () => planner.show(monthFromCalendarHash(location.hash, new Date())) });

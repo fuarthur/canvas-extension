@@ -26,6 +26,7 @@
     <button id="open" type="button">Open planner</button>
     <button id="reset" type="button">Reset fictional data</button>
     <button id="fail" type="button">Fail next local save</button>
+    <label>Simulated reminder state <select id="reminder-state"><option value="ready">Ready</option><option value="offline">Offline</option><option value="notification-denied">Notifications blocked</option></select></label>
     <a href="?width=390">390 px</a>
     <a href="?width=1280">1280 px</a>
     <a href="?">Fit window</a>
@@ -50,6 +51,7 @@
     document.querySelector('#open').onclick = () => send('open');
     document.querySelector('#reset').onclick = () => { frame.src = '?embedded=1'; };
     document.querySelector('#fail').onclick = () => send('fail');
+    document.querySelector('#reminder-state').onchange = event => frame.contentWindow.postMessage({sandbox:'canvas-quality',action:'reminder-state',state:event.target.value},location.origin);
     window.addEventListener('message', event => {
       if (event.origin === location.origin && event.source === frame.contentWindow && event.data?.sandbox === 'canvas-quality') {
         document.querySelector('#status').textContent = event.data.status;
@@ -140,6 +142,7 @@
       const saved = await request({type: 'PLAN_SAVE', plan: demoPlan, expectedRevision: 0});
       if (!saved.ok) throw new Error(saved.message);
       const host = document.createElement('div');
+      let reminderState='ready';
       const planner = mountPlanner({host, initialMonth: '2026-10', now, storeFactory: () => store, planningStoreFactory: () => store,
         loadSnapshot: async (_month, options = {}) => {
           const selected = (await store.load()).selectedCalendars || snapshot.selectedCalendars;
@@ -147,6 +150,7 @@
             events: events.filter(event => selected.includes(event.context_code)), assignments: assignments.filter(task => selected.includes(task.context_code))};
         },
         subscribeStorage: (_scope, listener) => { listeners.add(listener); return () => listeners.delete(listener); },
+        reminderClientFactory:()=>({accountSeen:async()=>({ok:true}),getStatus:async()=>({ok:true,status:{state:reminderState,lastSyncedAt:Date.parse('2026-10-02T12:00Z')}}),testNotification:async()=>reminderState==='notification-denied'?{ok:false,code:'NOTIFICATION'}:{ok:true}}),
         planClientFactory: () => ({save: (plan, expectedRevision) => request({type: 'PLAN_SAVE', plan, expectedRevision}),
           remove: (id, expectedRevision) => request({type: 'PLAN_DELETE', id, expectedRevision})}),
         schedulerClientFactory: () => {
@@ -161,6 +165,11 @@
       window.addEventListener('message', async event => {
         if (event.origin !== location.origin || event.source !== parent || event.data?.sandbox !== 'canvas-quality') return;
         if (event.data.action === 'open') await planner.show();
+        if (event.data.action === 'reminder-state'&&['ready','offline','notification-denied'].includes(event.data.state)) {
+          reminderState=event.data.state;
+          for(const listener of listeners)listener({[`canvas-planner:canvas.illinois.edu:${userId}:reminders:v1`]:{newValue:{}}});
+          report(`Simulated reminder state: ${reminderState}. No system notification will be sent.`);
+        }
         if (event.data.action === 'fail') {
           failNextWrite = true;
           report('Next local save will fail once. Edit a task, plan, or setting to review the error and retry.');

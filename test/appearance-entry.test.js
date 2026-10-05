@@ -6,11 +6,11 @@ import {JSDOM} from 'jsdom';
 import {memoryStorage} from './helpers/planning.js';
 import {createPlannerStore} from '../src/storage.js';
 import {defaultTheme} from '../src/themes.js';
-test('appearance entry runs before Canvas content without expanding permissions',async()=>{
+test('appearance entry runs before Canvas content with the expected extension permissions',async()=>{
  const manifest=JSON.parse(await readFile(new URL('../manifest.json',import.meta.url),'utf8'));
  const entry=manifest.content_scripts.find(s=>s.js.includes('appearance.js'));assert.ok(entry);
  assert.equal(entry.run_at,'document_start');assert.deepEqual(entry.matches,['https://canvas.illinois.edu/*']);assert.equal(entry.all_frames,false);assert.notEqual(entry.world,'MAIN');
- assert.deepEqual(manifest.permissions,['storage']);assert.deepEqual(manifest.host_permissions,['https://canvas.illinois.edu/*']);
+ assert.deepEqual(manifest.permissions,['storage','alarms','notifications']);assert.deepEqual(manifest.host_permissions,['https://canvas.illinois.edu/*']);
  for(const entry of manifest.content_scripts.filter(s=>!s.js.includes('appearance.js')))assert.deepEqual(entry.matches,['https://canvas.illinois.edu/calendar*']);
 });
 test('bundled early entry skips auth pages and applies verified appearance on a normal page',async()=>{

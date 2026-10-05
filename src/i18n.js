@@ -8,6 +8,23 @@ export const intlLocale = (document, english = 'en-US') => getLanguage(document)
 export function setLanguage(document, value) { languages.set(document, validLanguage(value) ? value : 'en'); }
 
 const zh = {
+  'Deadline reminders':'截止提醒','Enable deadline reminders':'启用截止提醒','Reminder rounds':'提醒轮数','Before deadline':'提前时间','Unit':'单位',
+  'Hours':'小时','Days':'天','Send test reminder':'发送测试提醒','Duplicate times were merged.':'重复的提醒时间已合并。',
+  'Desktop reminders for upcoming Canvas assignment deadlines in your selected calendars. Submitted and completed tasks are skipped.':'通过桌面通知提醒所选日历中即将截止的 Canvas 作业，已提交和已完成的任务会跳过。',
+  'Choose 1–5 rounds, each 1 minute to 30 days early. Times are sorted and duplicates are merged when saved.':'可设置 1–5 轮，每轮提前 1 分钟至 30 天；保存时自动排序并合并重复时间。',
+  'Keep the browser running. Canvas tabs can be closed. After sleep or restart, only the latest missed round is sent before the deadline. Browser or system settings may delay notifications.':'请保持浏览器运行，Canvas 标签页可以关闭。休眠或重启后，只会在截止前补发最近错过的一轮；浏览器或系统设置可能延迟通知。',
+  'Save planning settings to apply changes.':'保存规划设置后生效。',
+  'Reminders are off.':'提醒已关闭。','Reminders are ready.':'提醒已就绪。','Waiting for Canvas deadlines.':'正在等待 Canvas 截止信息。',
+  'Offline: using deadlines synced less than 24 hours ago.':'当前离线，使用 24 小时内同步的截止信息。',
+  'Reminders paused: deadlines have not synced for 24 hours.':'提醒已暂停：截止信息超过 24 小时未同步。',
+  'Reminders paused: sign in to Canvas again.':'提醒已暂停：请重新登录 Canvas。','System notifications are blocked.':'系统通知已被阻止。',
+  'Reminder status is unavailable.':'提醒状态暂不可用。','Reminder status is unavailable. Reload this Canvas page.':'提醒状态暂不可用，请刷新此 Canvas 页面。',
+  'Could not save reminder state. Reminders are paused.':'无法保存提醒状态，提醒已暂停。',
+  'A reminder delivery could not be confirmed. It will not be repeated.':'有一轮提醒的投递结果无法确认，该轮不会重复发送。',
+  'Could not update deadline reminders.':'无法更新截止提醒。','Notifications are blocked or unavailable.':'通知已被阻止或不可用。',
+  'No deadlines synced yet.':'尚未同步截止信息。','Sending test reminder…':'正在发送测试提醒…',
+  'Test reminder requested. Check your system notifications.':'已请求测试提醒，请查看系统通知。',
+  'Test reminder sent. No task was changed.':'这是一条测试提醒，未修改任何任务。',
   'Due in {minutes} min · {deadline}':'还有 {minutes} 分钟 · 截止 {deadline}',
   'Saved reminder settings are invalid; reminders are off.':'已保存的提醒设置无效，提醒已关闭。',
   'Choose 1–5 reminder rounds, each 1 minute to 30 days before the deadline.':'请选择 1–5 轮提醒，每轮提前 1 分钟至 30 天。',
@@ -245,6 +262,7 @@ const zh = {
 };
 
 const templates = {
+  'Reminder {n}':'第 {n} 轮','Reminder {n} amount':'第 {n} 轮提前数值','Reminder {n} unit':'第 {n} 轮时间单位','Last synced: {time}':'上次同步：{time}',
   '{count} tasks · {duration}':'{count} 项任务 · {duration}',
   'Page {page} / {pages} · {count} tasks':'第 {page} / {pages} 页 · {count} 项任务',
   'Actions for {title}':'{title} 的操作',

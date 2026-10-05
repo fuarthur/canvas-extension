@@ -177,6 +177,18 @@ test('calendar hash month is used when valid and falls back to current month', (
   assert.equal(monthFromCalendarHash('#view_name=month&view_start=2026-09-01', new Date('2026-01-02T12:00:00Z')), '2026-09');
   assert.equal(monthFromCalendarHash('#view_start=wrong', new Date('2026-01-02T12:00:00Z')), '2026-01');
 });
+test('reminder runtime updates refresh status without reloading or replacing settings drafts',async()=>{
+ const dom=new JSDOM('<main/>',{url:'https://canvas.illinois.edu/calendar'}),host=dom.window.document.createElement('div');
+ const {memoryStorage}=await import('./helpers/planning.js'),{createPlannerStore}=await import('../src/storage.js');
+ const area=memoryStorage(),store=createPlannerStore(area,'canvas.illinois.edu',77);let listen,loads=0,statuses=0;const seen=[];
+ const planner=mountPlanner({host,initialMonth:'2026-09',storeFactory:()=>store,subscribeStorage:(_scope,fn)=>{listen=fn;return()=>{listen=null;};},loadSnapshot:async()=>{loads++;return {profile:{...fixture.profile,id:77},contexts:[{code:'course_1',name:'Course 1'}],selectedCalendars:['course_1'],events:[],assignments:[],range:{startDate:'2026-01-01',endDate:'2027-12-31'}};},
+  reminderClientFactory:id=>({accountSeen:async data=>{seen.push({id,...data});return {ok:true};},getStatus:async()=>{statuses++;return {ok:true,status:{state:'off'}};}})});
+ await planner.show();host.shadowRoot.querySelector('[data-control-id="Calendar settings"]').click();await new Promise(r=>setTimeout(r,0));
+ assert.deepEqual(seen,[{id:77,selectedCalendars:['course_1']}]);const root=host.shadowRoot,amount=root.querySelector('[data-control-id="Reminder 1 amount"]');amount.value='7';amount.dispatchEvent(new dom.window.Event('change'));
+ const before=statuses;listen({'canvas-planner:canvas.illinois.edu:77:reminders:v1':{newValue:{}}});await new Promise(r=>setTimeout(r,0));
+ assert.equal(loads,1);assert.equal(root.querySelector('[data-control-id="Reminder 1 amount"]'),amount);assert.equal(amount.value,'7');assert.equal(statuses,before+1);
+ await planner.toggle();assert.equal(listen,null);dom.window.close();
+});
 
 test('toggle opens a single isolated view and closing leaves native nodes unchanged', async () => {
   const { dom, host, planner, click } = setup();

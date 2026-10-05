@@ -13,3 +13,5 @@ await build({
   minify: false
 });
 await copyFile('manifest.json', 'dist/manifest.json');
+await mkdir('dist/icons',{recursive:true});
+await copyFile('assets/deadline-128.png','dist/icons/deadline-128.png');
