@@ -189,6 +189,15 @@ test('reminder runtime updates refresh status without reloading or replacing set
  assert.equal(loads,1);assert.equal(root.querySelector('[data-control-id="Reminder 1 amount"]'),amount);assert.equal(amount.value,'7');assert.equal(statuses,before+1);
  await planner.toggle();assert.equal(listen,null);dom.window.close();
 });
+test('Settings draft saves after same-account refresh with fresh store instances',async()=>{
+ const dom=new JSDOM('<main/>',{url:'https://canvas.illinois.edu/calendar'}),host=dom.window.document.createElement('div');
+ const {memoryStorage}=await import('./helpers/planning.js'),{createPlannerStore}=await import('../src/storage.js');const area=memoryStorage();
+ const planner=mountPlanner({host,initialMonth:'2026-09',storeFactory:id=>createPlannerStore(area,'canvas.illinois.edu',id),loadSnapshot:async()=>({profile:{...fixture.profile,id:77},contexts:[],selectedCalendars:[],events:[],assignments:[],range:{startDate:'2026-01-01',endDate:'2027-12-31'}})});
+ const click=async label=>{host.shadowRoot.querySelector(`[data-control-id="${label}"]`).click();await new Promise(r=>setTimeout(r,0));};await planner.show();await click('Calendar settings');
+ const editor=host.shadowRoot.querySelector('.planning-settings'),amount=editor.querySelector('[data-control-id="Default estimate minutes"]');amount.value='77';amount.dispatchEvent(new dom.window.Event('change'));
+ await click('Refresh calendar');assert.equal(host.shadowRoot.querySelector('.planning-settings'),editor);await click('Save planning settings');
+ assert.match(editor.querySelector('[data-planning-settings-status]').textContent,/Planning settings saved/);assert.equal((await createPlannerStore(area,'canvas.illinois.edu',77).loadPlanningState()).settings.defaultMinutes,77);await planner.destroy();dom.window.close();
+});
 
 test('toggle opens a single isolated view and closing leaves native nodes unchanged', async () => {
   const { dom, host, planner, click } = setup();

@@ -14,7 +14,7 @@ const fault=code=>Object.assign(new Error(code),{code});
 const validSender=sender=>{try{const url=new URL(sender?.url);return url.origin==='https://'+hostname&&url.pathname==='/calendar'&&sender.frameId===0;}catch{return false;}};
 
 export function createReminderService({storageArea,storeFactory,fetchProfile,loadSnapshot,alarms,notifications,formatNotification=formatReminderNotification,now=Date.now}){
- let active=null,version=0,tail=Promise.resolve(),storageFailure=null;
+ let active=null,version=0,identityVersion=0,tail=Promise.resolve(),storageFailure=null;
  const cache=new Map();
  const check=ticket=>{if(ticket!==version)throw fault('CANCELLED');};
  const enqueue=operation=>{
@@ -41,13 +41,13 @@ export function createReminderService({storageArea,storeFactory,fetchProfile,loa
    await notifications.clear(id).catch(()=>{});delete record.notifications[id];
   }
  }
- async function verifyProfile(ticket){
-  try{const profile=await fetchProfile();check(ticket);return profile;}
+ async function verifyProfile(ticket,checkCurrent=()=>check(ticket)){
+  try{const profile=await fetchProfile();checkCurrent();return profile;}
   catch(error){
-   check(ticket);
+   checkCurrent();
    if(error.code==='AUTH'&&active){
     const record=await readRuntime(active.userId);record.snapshot=null;record.status={state:'auth',errorCode:'IDENTITY'};
-    await clearNotices(record);await save(record,ticket);await alarms.remove(REMINDER_NEXT_ALARM);
+    await clearNotices(record);await save(record,version);await alarms.remove(REMINDER_NEXT_ALARM);
    }
    throw error;
   }
@@ -169,14 +169,23 @@ export function createReminderService({storageArea,storeFactory,fetchProfile,loa
   handleMessage(message,sender){
    if(!REMINDER_MESSAGES.includes(message?.type))return Promise.resolve(undefined);
    if(!validSender(sender)||!/^\d+$/.test(String(message.userId))||(message.selectedCalendars!=null&&(!Array.isArray(message.selectedCalendars)||message.selectedCalendars.some(code=>typeof code!=='string'||!/^(user|course|group|account)_\d+$/.test(code)))))return Promise.resolve({ok:false,code:'INVALID',message:'Invalid reminder request.'});
-   if(message.type==='REMINDER_ACCOUNT_SEEN')version++;
+   let identityTicket;
+   if(message.type==='REMINDER_ACCOUNT_SEEN'){version++;identityTicket=++identityVersion;}
    return enqueue(async()=>{
-    const ticket=version,id=String(message.userId);let record;
+    let ticket=version;const id=String(message.userId);let record;
     if(message.type==='REMINDER_ACCOUNT_SEEN'){
-     const profile=await verifyProfile(ticket);check(ticket);record=await activate(profile,ticket);
-     if(record.scope.userId!==id)throw fault('IDENTITY');
-     if(Array.isArray(message.selectedCalendars)){record.fallbackSelection=[...new Set(message.selectedCalendars)];await save(record,ticket);}
-     await sync(profile);record=await readRuntime(id);
+     const checkIdentity=()=>{if(identityTicket!==identityVersion)throw fault('CANCELLED');};checkIdentity();
+     const profile=await verifyProfile(ticket,checkIdentity);
+     // Preference changes replan the verified identity; a newer account cancels it.
+     for(;;){
+      checkIdentity();ticket=version;
+      try{
+       record=await activate(profile,ticket);
+       if(record.scope.userId!==id)throw fault('IDENTITY');
+       if(Array.isArray(message.selectedCalendars)){record.fallbackSelection=[...new Set(message.selectedCalendars)];await save(record,ticket);}
+       await sync(profile);record=await readRuntime(id);checkIdentity();break;
+      }catch(error){checkIdentity();if(error.code!=='CANCELLED')throw error;}
+     }
     }else{
      if(active?.userId!==id)throw fault('IDENTITY');record=await readRuntime(id);
      if(message.type==='REMINDER_TEST'){

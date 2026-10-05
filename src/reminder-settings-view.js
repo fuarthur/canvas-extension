@@ -21,6 +21,7 @@ export function createReminderSettingsEditor({document,value,client,onChange}={}
    let unit=minutes%1440===0?'days':minutes%60===0?'hours':'minutes',amount=Number.isFinite(minutes)?minutes/({minutes:1,hours:60,days:1440}[unit]):'';
    const update=()=>{draft.leadMinutes[index]=reminderMinutes(Number(amount),unit)??NaN;changed();};
    const quantity=input(`Reminder ${index+1} amount`,amount,'number',v=>{amount=v;update();});quantity.min='0';quantity.max='43200';quantity.step='any';
+   quantity.addEventListener('input',()=>{amount=Number(quantity.value);update();});
    const units=select(`Reminder ${index+1} unit`,[['minutes','Minutes'],['hours','Hours'],['days','Days']],unit,v=>{unit=v;update();});
    const row=el('div','reminder-round');row.append(el('strong','',`Reminder ${index+1}`),field('Before deadline',quantity),field('Unit',units));rows.append(row);
   });applyDisabled();

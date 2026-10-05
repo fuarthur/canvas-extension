@@ -541,21 +541,24 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
     if (!settingsEditor || settingsEditorKey !== signature) {
       settingsEditor?.dispose();
       settingsEditorKey = signature;
-      const capturedStore=planningStore,capturedUser=snapshot.profile.id;
-      settingsEditor = renderPlanningSettings({ document, state: planningState, contexts: snapshot.contexts, currentMonth:month, reminderClient, onSave: async (settings2) => {
-        if(!open||planningStore!==capturedStore||String(snapshot?.profile.id)!==String(capturedUser))throw new Error('Canvas account changed. Open the planner again.');
+      const capturedUser=snapshot.profile.id;
+      const editor = renderPlanningSettings({ document, state: planningState, contexts: snapshot.contexts, currentMonth:month, reminderClient, onSave: async (settings2) => {
+        const current=()=>open&&settingsEditor===editor&&String(snapshot?.profile.id)===String(capturedUser);
+        if(!current())throw new Error('Canvas account changed. Open the planner again.');
+        const capturedStore=planningStore;
         const previousKey = settingsEditorKey;
         /* Keep this form when the storage notification installs our own save. */
         settingsEditorKey = settingsSignature(settings2);
         try {
           await capturedStore.setSettings(settings2);
-          if(!open||planningStore!==capturedStore)return;
+          if(!current())return;
           await refreshLocal();
         } catch (cause) {
-          if(planningStore===capturedStore)settingsEditorKey = previousKey;
+          if(current())settingsEditorKey = previousKey;
           throw cause;
         }
       } });
+      settingsEditor=editor;
     }
     localizeTree(settingsEditor);
     panel.append(settingsEditor);

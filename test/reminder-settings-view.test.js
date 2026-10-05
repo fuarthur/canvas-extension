@@ -19,6 +19,11 @@ test('fractional units save exact minutes and duplicate rounds normalize visibly
  change(dom,root,'Reminder rounds','3');for(let n=1;n<=3;n++){change(dom,root,`Reminder ${n} unit`,'hours');change(dom,root,`Reminder ${n} amount`,'2');}
  control(root,'Save planning settings').click();await settle();assert.deepEqual(saved.reminders,{enabled:true,leadMinutes:[120]});assert.equal(control(root,'Reminder rounds').value,'1');assert.match(root.textContent,/Duplicate times were merged/);root.dispose();dom.window.close();
 });
+test('typing an amount updates the draft before blur',async()=>{
+ const dom=new JSDOM('');let saved;const root=renderPlanningSettings({document:dom.window.document,state:planningState(),contexts:[],onSave:async s=>{saved=s;}});
+ change(dom,root,'Enable deadline reminders',true);const amount=control(root,'Reminder 1 amount');amount.value='4';amount.dispatchEvent(new dom.window.Event('input'));
+ control(root,'Save planning settings').click();await settle();assert.equal(saved.reminders.leadMinutes[0],240);assert.equal(control(root,'Reminder 1 amount').value,'4');root.dispose();dom.window.close();
+});
 test('drafts survive status updates failed saves and validation',async()=>{
  const dom=new JSDOM(''),d=defer();let attempts=0,saved;
  const root=renderPlanningSettings({document:dom.window.document,state:planningState(),contexts:[],reminderClient:{getStatus:()=>d.promise},onSave:async s=>{attempts++;if(attempts===1)throw new Error('Could not save settings.');saved=s;}});

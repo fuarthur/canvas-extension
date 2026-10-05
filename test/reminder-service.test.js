@@ -17,6 +17,20 @@ test('worker restart does not repeat sent or uncertain pending rounds',async()=>
 test('disabled users perform no scheduled fetch',async()=>{
  const h=await reminderHarness({enabled:false});await h.service.start();assert.equal(h.fetchCount,0);assert.equal(h.alarmsMap.size,0);assert.equal((await h.status()).status.state,'off');
 });
+test('first account verification survives settings saved while profile is pending',async()=>{
+ const h=await reminderHarness({enabled:false});delete h.area.entries['canvas-planner:canvas.illinois.edu:reminder-active:v1'];h.service=h.newService();await h.service.start();
+ const d=defer(),entered=defer();h.profileFn=()=>{entered.resolve();return d.promise;};
+ const registered=h.service.handleMessage({type:'REMINDER_ACCOUNT_SEEN',userId:77,selectedCalendars:['course_456']},sender);await entered.promise;
+ await h.store(77).setSettings({...defaultSettings(),reminders:{enabled:true,leadMinutes:[120]}});const changes={'canvas-planner:canvas.illinois.edu:77:settings:v1':{newValue:{}}};
+ h.service.invalidate(changes);const changed=h.service.handleStorageChanges(changes,'local');h.profileFn=null;d.resolve(h.profile);await Promise.all([registered,changed]);
+ assert.equal(h.area.entries['canvas-planner:canvas.illinois.edu:reminder-active:v1']?.userId,'77');assert.equal((await h.status()).ok,true);assert.equal(h.alarmsMap.get(REMINDER_REFRESH_ALARM)?.periodInMinutes,15);assert.ok(h.alarmsMap.has(REMINDER_NEXT_ALARM));
+});
+test('a newer account cancels the first pending account registration',async()=>{
+ const h=await reminderHarness();delete h.area.entries['canvas-planner:canvas.illinois.edu:reminder-active:v1'];h.service=h.newService();await h.service.start();
+ const d=defer(),entered=defer();h.profileFn=()=>{entered.resolve();return d.promise;};const old=h.service.handleMessage({type:'REMINDER_ACCOUNT_SEEN',userId:77},sender);await entered.promise;
+ h.profileFn=null;h.profile={id:88,time_zone:'America/Chicago'};const latest=h.service.handleMessage({type:'REMINDER_ACCOUNT_SEEN',userId:88,selectedCalendars:['course_456']},sender);d.resolve({id:77,time_zone:'America/Chicago'});
+ assert.equal((await old).code,'CANCELLED');assert.equal((await latest).ok,true);assert.equal(h.area.entries['canvas-planner:canvas.illinois.edu:reminder-active:v1'].userId,'88');assert.equal(h.creates.length,0);
+});
 test('offline grace expires at 24 hours without refreshing syncedAt',async()=>{
  const h=await reminderHarness();await h.service.start();const syncedAt=h.area.entries[runtimeKey(77)].snapshot.syncedAt;h.fetchError=new Error('offline');
  h.clock=Date.parse('2026-10-05T18:00Z');await h.service.handleAlarm({name:REMINDER_NEXT_ALARM});assert.equal(h.creates.length,1);assert.equal((await h.status()).status.state,'offline');assert.equal(h.area.entries[runtimeKey(77)].snapshot.syncedAt,syncedAt);

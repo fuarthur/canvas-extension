@@ -167,7 +167,7 @@
         if (event.data.action === 'open') await planner.show();
         if (event.data.action === 'reminder-state'&&['ready','offline','notification-denied'].includes(event.data.state)) {
           reminderState=event.data.state;
-          for(const listener of listeners)listener({[`canvas-planner:canvas.illinois.edu:${userId}:reminders:v1`]:{newValue:{}}});
+          for(const listener of listeners)listener({[`canvas-planner:${location.hostname}:${userId}:reminders:v1`]:{newValue:{}}});
           report(`Simulated reminder state: ${reminderState}. No system notification will be sent.`);
         }
         if (event.data.action === 'fail') {

@@ -14,7 +14,7 @@ export async function reminderHarness({enabled=true,clock=Date.parse('2026-10-05
  await area.set({[REMINDER_ACTIVE_KEY]:{schemaVersion:1,hostname:'canvas.illinois.edu',userId:'77',verifiedAt:clock}});
  h.snapshotData=()=>({profile:structuredClone(h.profile),contexts:[{code:'course_456',name:'EPSY 456'}],selectedCalendars:['course_456'],unavailableCalendars:h.unavailable,events:[],assignments:h.items.map(item=>({id:item.key.replace('assignment:','assignment_'),title:item.title,context_code:item.contextCodes[0],html_url:item.url,assignment:{due_at:item.dueAt,unlock_at:null,user_submitted:item.canvasCompleted}})),range:{startDate:'2026-10-05',endDate:'2026-11-05'}});
  h.newService=()=>createReminderService({storageArea:area,storeFactory:h.store,now:()=>h.clock,
-  fetchProfile:async()=>{h.fetchCount++;if(h.fetchError)throw h.fetchError;return structuredClone(h.profile);},
+  fetchProfile:async()=>{h.fetchCount++;if(h.fetchError)throw h.fetchError;if(h.profileFn)return h.profileFn();return structuredClone(h.profile);},
   loadSnapshot:async()=>{h.snapshotCount++;if(h.snapshotFn)return h.snapshotFn();if(h.snapshotError)throw h.snapshotError;return h.snapshotData();},
   alarms:{get:async name=>alarmsMap.get(name),set:async(name,info)=>alarmsMap.set(name,{name,...info,scheduledTime:info.when}),remove:async name=>alarmsMap.delete(name)},
   notifications:{permission:async()=>h.permission,create:async data=>{await h.beforeCreate?.(data);if(h.createError)throw h.createError;creates.push(data);visible.set(data.id,data);return data.id;},clear:async id=>{clears.push(id);return visible.delete(id);},open:async url=>{opens.push(url);}},
