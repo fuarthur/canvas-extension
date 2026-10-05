@@ -8,6 +8,11 @@ export const intlLocale = (document, english = 'en-US') => getLanguage(document)
 export function setLanguage(document, value) { languages.set(document, validLanguage(value) ? value : 'en'); }
 
 const zh = {
+  'Due in {minutes} min · {deadline}':'还有 {minutes} 分钟 · 截止 {deadline}',
+  'Saved reminder settings are invalid; reminders are off.':'已保存的提醒设置无效，提醒已关闭。',
+  'Choose 1–5 reminder rounds, each 1 minute to 30 days before the deadline.':'请选择 1–5 轮提醒，每轮提前 1 分钟至 30 天。',
+  'Choose 1–5 reminder rounds.':'请选择 1–5 轮提醒。',
+  'Untitled assignment':'未命名作业',
   'Previous tasks page':'上一页任务','Next tasks page':'下一页任务','Previous scheduled tasks page':'上一页已安排任务','Next scheduled tasks page':'下一页已安排任务','Tasks pages':'任务分页','Scheduled tasks pages':'已安排任务分页',
   'Previous plan week':'上一周','Next plan week':'下一周','Current plan week':'回到今天','Weekly plan timeline':'每周计划时间表','Outside plan range':'计划范围外','Time':'时间','Locked':'已锁定',
   'Drag tasks into a time slot. Drag existing blocks to move them. Click a block to edit.':'将任务拖入具体时段，拖动已有任务块可调整安排，点击任务块可编辑。',
@@ -303,18 +308,19 @@ const compiled = Object.entries(templates).map(([source, target]) => {
   return {regex:new RegExp(pattern + escape(source.slice(cursor)) + '$', 's'), keys, target};
 });
 const localValues = new Set(['duration','estimateDuration','peak','before','after','dayName','dayLabel','estimateLabel','kind','message']);
-export function translate(document, source) {
-  if (Array.isArray(source)) return source.map(value => translate(document, value)).join(' ');
+export function translate(document,source){return translateForLanguage(getLanguage(document),source);}
+export function translateForLanguage(language, source) {
+  if (Array.isArray(source)) return source.map(value => translateForLanguage(language, value)).join(' ');
   if (source && typeof source === 'object' && typeof source.key === 'string') {
-    const template = getLanguage(document) === 'zh-CN' ? (templates[source.key] || zh[source.key] || source.key) : source.key;
+    const template = language === 'zh-CN' ? (templates[source.key] || zh[source.key] || source.key) : source.key;
     return template.replace(/\{(\w+)\}/g, (_, key) => String(source.values[key] ?? ''));
   }
-  if (source == null || getLanguage(document) !== 'zh-CN') return source;
+  if (source == null || language !== 'zh-CN') return source;
   const value = String(source);
   if (Object.hasOwn(zh, value)) return zh[value];
   for (const {regex, keys, target} of compiled) {
     const match = value.match(regex); if (!match) continue;
-    const values = Object.fromEntries(keys.map((key, i) => [key, localValues.has(key) ? translate(document, match[i+1]) : match[i+1]]));
+    const values = Object.fromEntries(keys.map((key, i) => [key, localValues.has(key) ? translateForLanguage(language, match[i+1]) : match[i+1]]));
     return target.replace(/\{(\w+)\}/g, (_, key) => values[key]);
   }
   return source;
