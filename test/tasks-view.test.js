@@ -1,6 +1,16 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {JSDOM} from 'jsdom';
 import * as view from '../src/tasks-view.js';import {createPlannerStore} from '../src/storage.js';import {task,memoryStorage} from './helpers/planning.js';import {setLanguage,localizeTree} from '../src/i18n.js';
 const settle=()=>new Promise(r=>setTimeout(r,0));
+test('a task can be completed from its row and undone without opening details or selecting a batch',async()=>{
+ const s=await setup();s.root.querySelector('[data-control-id="Complete Essay"]').focus();await s.click('Complete Essay');
+ assert.deepEqual((await s.store.load()).completed,{'assignment:1':true});
+ assert.equal(s.dom.window.document.activeElement.dataset.controlId,'Undo task changes');
+ await s.click('Undo task changes');assert.deepEqual((await s.store.load()).completed,{});
+ s.fail();s.root.querySelector('[data-control-id="Complete Essay"]').focus();await s.click('Complete Essay');assert.match(s.root.textContent,/Storage is full/);
+ assert.ok(s.root.querySelector('[data-task-row="assignment:1"]'));assert.deepEqual((await s.store.load()).completed,{});
+ assert.equal(s.dom.window.document.activeElement.dataset.controlId,'Complete Essay');
+ s.controller.destroy();s.dom.window.close();
+});
 async function setup({taskPreferences}={}){
  const dom=new JSDOM('<main/>'),document=dom.window.document,area=memoryStorage(),store=createPlannerStore(area,'canvas.illinois.edu',77);
  if(taskPreferences)await store.setTaskPreferences(taskPreferences);
@@ -81,6 +91,13 @@ test('advanced filters collapse without hiding active restrictions or losing the
  assert.equal(s.root.querySelector('.task-more-filters').open,false);assert.match(s.root.querySelector('.active-task-filters').textContent,/Homework/);
  assert.equal(s.root.querySelector('[data-control-id="Tasks type"]').value,'assignment');assert.equal(s.root.querySelectorAll('[data-task-row]').length,2);
  await s.click('Reset task filters');assert.equal(s.root.querySelector('.active-task-filters').textContent,'');s.controller.destroy();s.dom.window.close();
+});
+test('removing the completed filter also exits the completed preset',async()=>{
+ const s=await setup();await s.click('Completed tasks');assert.equal(s.root.querySelectorAll('[data-task-row]').length,1);
+ await s.click('Reset Tasks completion');assert.equal(s.root.querySelectorAll('[data-task-row]').length,2);
+ assert.equal(s.root.querySelector('[data-control-id="All tasks"]').getAttribute('aria-pressed'),'true');
+ assert.equal(s.root.querySelector('[data-control-id="Tasks completion"]').value,'remaining');
+ assert.equal((await s.store.loadPlanningState()).taskPreferences.preset,'all');s.controller.destroy();s.dom.window.close();
 });
 test('batch editors open one at a time and preserve unfinished input across switching',async()=>{
  const s=await setup();await s.click('Select all filtered tasks');assert.equal(s.root.querySelector('[data-control-id="Bulk estimate minutes"]'),null);

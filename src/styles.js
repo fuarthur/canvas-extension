@@ -1,3 +1,4 @@
+import {interfaceStyles} from './interface-styles.js';
 export const styles = `
   :host { all: initial; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--cp-text); }
   *, *::before, *::after { box-sizing: border-box; }
@@ -174,4 +175,5 @@ export const styles = `
   .week-block.completed { text-decoration:none;background:var(--cp-completed-bg);border-color:var(--cp-completed-border);color:var(--cp-completed-text); }.week-block.completed .week-block-title { padding-right:32px; }.week-block.completed .week-block-time { color:var(--cp-text);text-decoration:none; }.week-block-completed { position:absolute;right:20px;top:1px;font-size:11px;font-weight:700;line-height:14px;pointer-events:none; }.fixed-block .week-block-completed { right:4px; }
   @media(max-width:800px) { .plan-columns { grid-template-columns:1fr; }.task-pool { height:350px;max-height:none;padding:0 0 12px; }.week-scroll { height:520px; }.week-range { width:100%; } }
   @media(max-width:600px) { .theme-color-grid { grid-template-columns:1fr; } }
+${interfaceStyles}
 `;

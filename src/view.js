@@ -92,11 +92,17 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
   let draftSelection = /* @__PURE__ */ new Set();
   let saving = false;
   const expandedWeeks = /* @__PURE__ */ new Set();
+  const actionMenuSelector='.plan-more-actions[open],.bulk-more-actions[open],.week-block-actions[open]';
+  const closeOutsideMenus=event=>{
+    const target=event.composedPath()[0];
+    for(const menu of root.querySelectorAll(actionMenuSelector))if(!menu.contains(target))menu.open=false;
+  };
   const todayDay = () => dateKey(typeof now === "function" ? now() : now, snapshot?.profile?.time_zone);
-  const { el } = ui(document);
+  const { el, icon, disclosure } = ui(document);
   let settingsEditor = null, settingsEditorKey = "";
   let reminderClient = null, reminderUserId = null;
   let themeEditor = null, themeEditorUserId = null;
+  let calendarSettingsOpen = false;
   const systemTheme = document.defaultView.matchMedia?.("(prefers-color-scheme: dark)");
   const applyAppearance = () => applyTheme(host, planningState.theme, systemTheme?.matches);
   const onSystemThemeChange = () => {
@@ -154,6 +160,7 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
     error = null;
     host.remove();
     document.removeEventListener("keydown", onKeyDown);
+    root.removeEventListener('click',closeOutsideMenus);
     if (opener?.isConnected) opener.focus({ preventScroll: true });
     opener = null;
   }
@@ -176,6 +183,8 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
+      const menu=[...root.querySelectorAll(actionMenuSelector)].find(node=>node.contains(root.activeElement))||root.querySelector(actionMenuSelector);
+      if(menu){menu.open=false;menu.querySelector('summary')?.focus();return;}
       close();
     } else if (event.key === 'Tab') {
       const controls = [...root.querySelectorAll('button, a[href], input:not([type="hidden"]), select, textarea, summary, [tabindex]')].filter(isVisibleControl);
@@ -187,6 +196,7 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
     }
   }
   function discardIdentity() {
+    calendarSettingsOpen = false;
     settingsEditor?.dispose();settingsEditor=null;settingsEditorKey='';reminderClient=null;reminderUserId=null;
     detailView.reset();
     snapshot = store = planningStore = null;
@@ -444,7 +454,13 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
   }
   function settings() {
     const panel = el("section", "settings");
-    panel.append(el("h2", "", "Choose calendars"), el("p", "hint", "Only selected calendars will be loaded. Your selection is saved for this Canvas account."));
+    const heading=el('div','settings-heading');heading.append(el('h2','','Settings'));
+    const general=el('section','general-settings');
+    const generalHeading=el('div','settings-group-heading');generalHeading.append(el('h3','','Appearance'),el('span','hint','Saved automatically'));general.append(generalHeading);
+    const calendars=disclosure('Choose calendars','calendar-selection settings-section',`${draftSelection.size} selected`);
+    calendars.open=calendarSettingsOpen||snapshot.selectedCalendars?.length===0;
+    calendars.append(el('p','hint','Only selected calendars will be loaded. Your selection is saved for this Canvas account.'));
+    panel.append(heading,general,calendars);
     const tools = el("div", "settings-actions");
     tools.append(
       action("Select all calendars", "Select all", () => {
@@ -460,7 +476,8 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
         render();
       })
     );
-    panel.append(tools);
+    if(!snapshot.unavailableCalendars?.length)tools.lastElementChild.remove();
+    calendars.append(tools);
     for (const context of snapshot.contexts) {
       const row = el("label", "calendar-choice");
       const input = el("input");
@@ -471,13 +488,14 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
       input.addEventListener("change", () => {
         if (input.checked) draftSelection.add(context.code);
         else draftSelection.delete(context.code);
+        setText(calendars.querySelector('.disclosure-value'),`${draftSelection.size} selected`);
       });
       const label = el("div");
       label.append(el("span", "", context.name || context.code, true));
       const kind = context.code.split("_")[0];
-      label.append(el("p", "hint", `${{ user: "Personal", course: "Course", group: "Group", account: "Account" }[kind] || "Calendar"}${snapshot.unavailableCalendars?.includes(context.code) ? " \xB7 Canvas denied access" : ""}`));
+      if(kind!=='course'||snapshot.unavailableCalendars?.includes(context.code))label.append(el("p", "hint", `${{ user: "Personal", course: "Course", group: "Group", account: "Account" }[kind] || "Calendar"}${snapshot.unavailableCalendars?.includes(context.code) ? " \xB7 Canvas denied access" : ""}`));
       row.append(input, label);
-      panel.append(row);
+      calendars.append(row);
     }
     const save = action("Save calendar selection", saving ? "Saving\u2026" : "Save and load", async () => {
       if (saving) return;
@@ -498,7 +516,9 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
       }
     });
     save.disabled = saving;
-    panel.append(save, action("Retry unavailable calendars", "Retry calendar access", () => load(true, { retryUnavailable: true })));
+    const calendarActions=el('div','settings-actions');calendarActions.append(save);
+    calendarActions.append(action("Retry unavailable calendars", "Retry calendar access", () => load(true, { retryUnavailable: true }), 'text-button'));
+    calendars.append(calendarActions);
     const languageField = el("label", "field", "Language / \u8BED\u8A00");
     const languageSelect = ui(document).select("Interface language", [["en", "English", true], ["zh-CN", "\u7B80\u4F53\u4E2D\u6587", true]], planningState.settings.language || "en");
     const languageNotice = el("p", "hint");
@@ -516,7 +536,7 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
       }
     });
     languageField.append(languageSelect);
-    panel.prepend(languageField, languageNotice);
+    general.append(languageField, languageNotice);
     if (!themeEditor || themeEditorUserId !== snapshot.profile.id) {
       themeEditorUserId = snapshot.profile.id;
       const capturedStore = planningStore;
@@ -535,7 +555,7 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
     }
     themeEditor.update(planningState.theme,planningState.themeScope);
     localizeTree(themeEditor.element);
-    panel.insertBefore(themeEditor.element, languageField.nextSibling);
+    general.append(themeEditor.element);
     const settingsSignature = (value) => JSON.stringify([snapshot.profile.id, month, snapshot.contexts, { ...value, language: void 0 }]);
     const signature = settingsSignature(planningState.settings);
     if (!settingsEditor || settingsEditorKey !== signature) {
@@ -566,7 +586,8 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
     return panel;
   }
   function calendar(items) {
-    const container = el("div");
+    const container = el("div",'calendar-board');
+    container.tabIndex=0;setLabel(container,'Planning calendar view');
     const weekdayRow = el("div", "weekday-row");
     for (const day of ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]) weekdayRow.append(el("span", "", day));
     container.append(weekdayRow);
@@ -593,13 +614,14 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
         cell.append(el("span", "day-number", String(Number(day.slice(-2))), true));
         setLabel(cell, day);
         const point = pressure.get(day);
-        const badgeText = point.tasks ? `${point.tasks} to do` : "No tasks";
+        const badgeText = String(point.tasks);
         const badge = action(`View remaining tasks for ${day}`, badgeText, () => {
           selectedDay = day;
           selectedKey = null;
           render();
         }, `pressure-badge ${point.tasks ? pressureLevel(point.tasks, planningState.settings) : "empty"}`);
         badge.dataset.pressureDay = day;
+        badge.hidden = !point.tasks;
         badge.title = translate(document, `${point.tasks} remaining \xB7 ${point.minutes} min`);
         cell.append(badge);
         days.append(cell);
@@ -664,6 +686,7 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
   }
   function render() {
     if (!open) return;
+    const oldCalendars=root.querySelector('.calendar-selection');if(oldCalendars)calendarSettingsOpen=oldCalendars.open;
     const preserveScroll = renderedTab === activeTab && renderedMonth === month;
     if (!preserveScroll) savedContentScroll = 0;
     else if (!renderedLoading) savedContentScroll = root.querySelector(".content")?.scrollTop || 0;
@@ -691,32 +714,45 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
     setLabel(shell, "Planning calendar");
     const header = el("header", "header");
     const identity = el("div", "identity");
-    identity.append(el("p", "eyebrow", "Illinois Canvas"), el("h1", "", "Planning calendar"), el("p", "subline", "Canvas completion and your own planning marks"));
+    const brand = el('span','brand-icon');brand.append(icon('planner'));
+    identity.append(brand, el("h1", "", "Planning calendar"));
     header.append(identity);
     const controls = el("div", "controls");
     if (activeTab === "calendar" || activeTab === "workload") {
       controls.append(action("Previous month", "\u2039", () => navigate(shiftMonth(month, -1))), el("span", "month-name", new Intl.DateTimeFormat(intlLocale(document), { month: "long", year: "numeric" }).format(/* @__PURE__ */ new Date(`${month}-01T12:00:00`))), action("Next month", "\u203A", () => navigate(shiftMonth(month, 1))), action("Today", "Today", () => navigate(todayDay().slice(0, 7))));
-    } else if (activeTab === "tasks" && snapshot?.range) {
-      controls.append(el("span", "toolbar-context", `Loaded range \xB7 ${snapshot.range.startDate} \u2013 ${snapshot.range.endDate}`));
-    } else controls.append(el("span", "toolbar-context", activeTab === "planner" ? "Planner" : "Settings"));
-    controls.append(action("Refresh calendar", "Refresh", () => load(true)), action("Close planning calendar", "\xD7", close, "close"));
+    }
+    const refresh = action("Refresh calendar", "", () => load(true), 'control icon-button');
+    refresh.append(icon('refresh'));refresh.title=translate(document,'Refresh calendar');
+    controls.append(refresh, action("Close planning calendar", "\xD7", close, "close"));
     header.append(controls);
     shell.append(header);
     const tabs = el("nav", "tabs");
     tabs.setAttribute("role", "tablist");
     setLabel(tabs, "Planner views");
-    for (const [tab, name, label] of [["calendar", "Calendar", "Planning calendar view"], ["tasks", "Task list", "Task list view"], ["workload", "Workload", "Workload view"], ["planner", "Planner", "Planner view"], ["settings", "Settings", "Calendar settings"]]) {
+    for (const [tab, name, label] of [["calendar", "Calendar", "Planning calendar view"], ["tasks", "Tasks", "Task list view"], ["workload", "Workload", "Workload view"], ["planner", "Planner", "Planner view"], ["settings", "Settings", "Calendar settings"]]) {
       const button = action(label, name, () => changeTab(tab), "tab");
+      button.prepend(icon(tab));
+      button.id = `planner-tab-${tab}`;
+      button.tabIndex = activeTab === tab ? 0 : -1;
       button.setAttribute("role", "tab");
       button.setAttribute("aria-selected", String(activeTab === tab));
       button.setAttribute("aria-controls", "planner-panel");
       button.disabled = loading || saving || !snapshot;
       tabs.append(button);
     }
+    tabs.addEventListener('keydown', event => {
+      if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
+      const choices=[...tabs.querySelectorAll('[role="tab"]:not(:disabled)')];
+      const index=choices.indexOf(event.target);if(index<0)return;
+      const next=event.key==='Home'?0:event.key==='End'?choices.length-1:(index+(event.key==='ArrowRight'?1:-1)+choices.length)%choices.length;
+      event.preventDefault();
+      choices.forEach((node,i)=>{node.tabIndex=i===next?0:-1;});choices[next].focus();
+    });
     shell.append(tabs);
     const body = el("div", "content");
     body.id = "planner-panel";
     body.setAttribute("role", "tabpanel");
+    body.setAttribute('aria-labelledby',`planner-tab-${activeTab}`);
     if (loadingScreen) {
       const status=el('div','status calendar-loading');status.setAttribute('role','status');status.setAttribute('aria-live','polite');
       const title=el('div','loading-title'),spinner=el('span','loading-spinner');spinner.setAttribute('aria-hidden','true');
@@ -749,9 +785,10 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
       }
       for (const warning of planningState.warnings) body.append(el("p", "notice", warning));
       const pressure = workloadSummary(items, combinedState(), { now: typeof now === "function" ? now() : now, timeZone: snapshot.profile.time_zone, range: monthRange() });
-      const todaySummary = el("p", "today-summary", `Today \xB7 ${pressure.today.tasks} remaining \xB7 ${pressure.overdue.length} overdue`);
+      const todaySummary = el("div", "today-summary");
+      todaySummary.append(el('span','',`Today · ${pressure.today.tasks} remaining`));
       body.append(todaySummary);
-      todaySummary.append(action("View overdue homework", "Overdue H/W", showOverdue, "text-button"));
+      todaySummary.append(action("View overdue homework", `${pressure.overdue.length} overdue`, showOverdue, pressure.overdue.length?'overdue-shortcut':'text-button'));
       if (activeTab === "tasks") body.append(taskListController(items).render());
       else if (activeTab === "workload") body.append(renderWorkloadView({ document, items: activeItems(items), state: combinedState(), range: monthRange(), now: typeof now === "function" ? now() : now, timeZone: snapshot.profile.time_zone, onOpenItem: (key) => {
         selectedKey = key;
@@ -807,6 +844,7 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
     snapshot = null;
     systemTheme?.addEventListener("change", onSystemThemeChange);
     document.addEventListener("keydown", onKeyDown);
+    root.addEventListener('click',closeOutsideMenus);
     try {
       // Read local appearance before mounting anything that could paint a light frame.
       const theme = await loadInitialTheme?.();

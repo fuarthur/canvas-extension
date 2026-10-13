@@ -13,7 +13,7 @@ import { renderPlanEditor } from "./plan-editor-view.js";
 import { renderPlanComparison } from "./plan-compare-view.js";
 function createPlannerController(options) {
   const { document, planClient, onOpenItem, onComplete, onDirtyChange } = options;
-  const { el, button, input, field, select } = ui(document);
+  const { el, button, input, field, select, disclosure } = ui(document);
   const root = el("section", "planner-workbench");
   let data = { items: options.items, state: options.state, loadedRange: options.loadedRange, completed: options.completed || {} };
   let archives = { ...data.state.plans };
@@ -34,6 +34,8 @@ function createPlannerController(options) {
   const facts = () => ({ items: data.items, completed: data.completed, now: now().toISOString(), loadedRange: data.loadedRange, state: data.state });
   const mark = (value) => {
     dirty = value;
+    root.querySelector('[data-control-id="Save plan"]')?.classList.toggle('primary',dirty&&!preview);
+    root.querySelector('[data-control-id="Generate balanced plan"]')?.classList.toggle('primary',!dirty&&!preview);
     onDirtyChange?.(value);
   };
   async function setCompletion(key, value) {
@@ -287,7 +289,7 @@ function createPlannerController(options) {
       preview = null;
       notice = "Generated work accepted into the draft. Save to keep it.";
       draw();
-    }));
+    },'control primary'));
     panel.append(button("Discard generated preview", () => {
       preview = null;
       draw();
@@ -329,7 +331,7 @@ function createPlannerController(options) {
     if (draft) {
       const moreActions = el("details", "plan-more-actions");
       moreActions.append(el("summary", "", "More actions"));
-      toolbar.append(button("Save plan", save, "control primary", saving ? "Saving\u2026" : "Save"), moreActions);
+      toolbar.append(button("Save plan", save, dirty&&!preview?"control primary":"control", saving ? "Saving\u2026" : "Save"), moreActions);
       moreActions.append(button("Copy plan", () => {
         draft = copyPlan(draft, { id: newId("plan"), name: `${draft.name.slice(0, 110)}${getLanguage(document) === "zh-CN" ? " \u526F\u672C" : " copy"}`, now: now() });
         mark(true);
@@ -341,7 +343,7 @@ function createPlannerController(options) {
       }, "text-button", "Delete"));
       toolbar.querySelector('[data-control-id="Save plan"]').disabled = saving;
       if (options.schedulerClient) {
-        toolbar.append(button("Generate balanced plan", generate, "control primary", generating ? "Generating\u2026" : "Generate balanced plan"));
+        toolbar.append(button("Generate balanced plan", generate, dirty||preview ? "control" : "control primary", generating ? "Generating\u2026" : "Generate"));
         toolbar.querySelector('[data-control-id="Generate balanced plan"]').disabled = generating;
         if (generating) toolbar.append(button("Cancel generation", cancelGeneration, "text-button"));
       }
@@ -354,9 +356,9 @@ function createPlannerController(options) {
         saveStatus.className = "draft-notice";
         setText(saveStatus, "Unsaved changes");
       });
-      root.append(field("Plan name", name), el("p", "hint plan-range", `Loaded range \xB7 ${draft.range.startDate} \u2013 ${draft.range.endDate}`), saveStatus);
+      const planHeading=el('div','plan-heading');planHeading.append(field("Plan name", name),saveStatus);root.append(planHeading);
       const configuration = el("details", "plan-configuration");
-      configuration.append(el("summary", "", "Plan dates, rest days & capacity"));
+      configuration.append(el("summary", "", "Plan settings"),el("p", "hint plan-range", `Loaded range \xB7 ${draft.range.startDate} \u2013 ${draft.range.endDate}`));
       const range = { ...draft.range };
       const schedule = structuredClone(draft.schedule);
       let thresholdMinutes=nonSplitThreshold(draft);
@@ -434,7 +436,11 @@ function createPlannerController(options) {
       const columns = el("div", "plan-columns");
       columns.append(pool(), daily(renderEditor));
       root.append(columns, analytics);
-    } else root.append(el("div", "empty-state", "Create a plan to organize your remaining tasks by day."));
+    } else {
+      const empty=el('div','empty-state');
+      empty.append(el('h3','','Arrange your week'),el('p','','Create a plan, then generate a schedule or arrange tasks yourself.'),button('Create first plan',newPlan,'control primary','New plan'));
+      root.append(empty);
+    }
     if (notice) root.append(el("p", conflict ? "notice" : "hint", notice));
     if (conflict) root.append(button("Reload saved plan", async () => {
       if (options.onReloadPlans) {
@@ -523,6 +529,7 @@ function createPlannerController(options) {
     const panel = el("aside", "task-pool");
     panel.append(el("h3", "", "Remaining tasks"));
     const search = input("Search tasks", filters.query);
+    search.placeholder=translate(document,'Search tasks…');
     search.addEventListener("input", () => {
       filters.query = search.value;
       taskPage=0;scheduledPage=0;poolScroll=0;
@@ -534,7 +541,9 @@ function createPlannerController(options) {
       filters.course = v;
       taskPage=0;scheduledPage=0;
       draw();
-    }), select("Task sort", [["dueAsc", "Deadline: nearest first"], ["dueDesc", "Deadline: latest first"], ["estimateAsc", "Estimate: shortest first"], ["estimateDesc", "Estimate: longest first"]], filters.sort, (v) => {
+    }));
+    const advanced=disclosure('Sort & filter','pool-filters',filters.sort!=='dueAsc'||filters.status!=='all'||filters.group?'Filters active':null);
+    advanced.append(select("Task sort", [["dueAsc", "Deadline: nearest first"], ["dueDesc", "Deadline: latest first"], ["estimateAsc", "Estimate: shortest first"], ["estimateDesc", "Estimate: longest first"]], filters.sort, (v) => {
       filters.sort = v;
       taskPage=0;scheduledPage=0;
       draw();
@@ -549,7 +558,7 @@ function createPlannerController(options) {
       filters.group = group.checked;
       draw();
     });
-    panel.append(field("Group by course", group));
+    advanced.append(field("Group by course", group));panel.append(advanced);
     const amount = (key) => minutesByTask.get(key) || 0;
     const estimate = (item) => draft.tasks[item.key]?.estimateMinutes || resolveEstimate(item, data.state).minutes;
     const filtered = data.items.filter((i) => !i.completed && !data.completed[i.key] && (!isHistoricalTask(i, data.state, { now: now(), timeZone: options.timeZone }) || draft.tasks[i.key]) && i.title.toLocaleLowerCase().includes(filters.query.trim().toLocaleLowerCase()) && (filters.course === "all" || i.contextCodes?.includes(filters.course))).filter((i) => filters.status === "all" || (filters.status === "none" ? amount(i.key) === 0 : filters.status === "partial" ? amount(i.key) > 0 && amount(i.key) < estimate(i) : amount(i.key) >= estimate(i)));

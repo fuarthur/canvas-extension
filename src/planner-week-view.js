@@ -24,13 +24,14 @@ function placeBlocks(blocks){
 }
 
 export function renderPlannerWeek({document,plan,startDay,today,points,segmentsByDay,tasks,events,formatClock,onNavigate,onDrop,onEdit,onRemove,onLock,onOpen,onComplete,dropNotice,urgency,completionStates}){
- const {el,button}=ui(document);const panel=el('section','daily-plan');
+ const {el,button,help}=ui(document);const panel=el('section','daily-plan');
  const endDay=addDays(startDay,6);
  const toolbar=el('div','week-toolbar');toolbar.append(el('h3','','Your days'));
  const previous=button('Previous plan week',()=>onNavigate(addDays(startDay,-7)),'control','‹');previous.disabled=addDays(startDay,-1)<plan.range.startDate;
  const next=button('Next plan week',()=>onNavigate(addDays(startDay,7)),'control','›');next.disabled=addDays(startDay,7)>plan.range.endDate;
  toolbar.append(previous,button('Current plan week',()=>onNavigate(today,true),'control','Today'),next,el('span','week-range',`${startDay} – ${endDay}`));
- panel.append(toolbar,el('p','hint week-instructions','Drag tasks into a time slot. Drag existing blocks to move them. Click a block to edit.'));
+ const guidance=help('Drag tasks into a time slot. Drag existing blocks to move them. Click a block to edit.');guidance.classList.add('week-instructions');
+ panel.append(toolbar,guidance);
  if(dropNotice){const line=el('p','notice week-drop-notice',dropNotice);line.setAttribute('role','alert');panel.append(line);}
  const scroll=el('div','week-scroll');scroll.tabIndex=0;setLabel(scroll,'Weekly plan timeline');
  const grid=el('div','week-grid');scroll.append(grid);panel.append(scroll);

@@ -4,7 +4,7 @@ import { normalizeTheme, themeOptions, defaultCustomColors, validColor, contrast
 import {normalizeThemeScope} from './appearance.js';
 
 export function createThemeSettings({ document, value, scope, onSave, onSaveScope }) {
-  const { el, field, select, input, button } = ui(document);
+  const { el, field, select, input, button, disclosure, help } = ui(document);
   let current = normalizeTheme(value), busy = false;
   let currentScope=normalizeThemeScope(scope);
   const panel = el('section', 'theme-settings');
@@ -15,14 +15,15 @@ export function createThemeSettings({ document, value, scope, onSave, onSaveScop
   const controls = [];
   const preset = select('Interface theme', themeOptions, current.preset, value => save({ ...current, preset: value }));
   controls.push(preset);
-  panel.append(el('h2', '', 'Appearance'), field('Theme', preset), el('p', 'hint', 'Appearance changes are saved automatically for this Canvas account.'));
+  panel.append(field('Theme', preset));
   const scopeControl=select('Theme applies to',[['planner','Planning tab only'],['canvas','Entire Canvas']],currentScope,saveScope);
   controls.push(scopeControl);
-  panel.append(field('Theme applies to',scopeControl),el('p','hint','Global themes adjust the Canvas interface; course colors, event color accents, and content colors stay unchanged.'));
+  const advanced=disclosure('Theme applies to','theme-scope-options',currentScope==='canvas'?'Entire Canvas':'Planning tab only');
+  advanced.append(field('Theme applies to',scopeControl),help('Global themes adjust the Canvas interface; course colors, event color accents, and content colors stay unchanged.'));
   const preview = el('div', 'theme-preview');
   preview.setAttribute('aria-hidden', 'true');
   preview.append(el('span', 'theme-preview-surface'), el('span', 'theme-preview-accent'), el('span', 'theme-preview-text'));
-  panel.append(preview);
+  panel.append(advanced);
   const custom = el('div', 'custom-theme');
   const base = select('Custom theme base', [['light', 'Light base'], ['dark', 'Dark base']], current.custom.base,
     value => save({ preset: 'custom', custom: defaultCustomColors(value) }));
@@ -52,11 +53,12 @@ export function createThemeSettings({ document, value, scope, onSave, onSaveScop
   const reset = button('Reset custom colors', () => save({ ...current, custom: defaultCustomColors(current.custom.base) }));
   controls.push(reset);
   custom.append(grid, reset, warning);
-  panel.append(custom, notice);
+  custom.prepend(preview);panel.append(custom, notice);
 
   function sync() {
     preset.value = current.preset;
     scopeControl.value=currentScope;
+    setText(advanced.querySelector('.disclosure-value'),currentScope==='canvas'?'Entire Canvas':'Planning tab only');
     base.value = current.custom.base;
     custom.hidden = current.preset !== 'custom';
     for (const [key, { picker, hex }] of pairs) picker.value = hex.value = current.custom[key];

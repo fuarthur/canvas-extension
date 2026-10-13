@@ -5,16 +5,18 @@ import {normalizeReminderSettings,reminderMinutes,resizeReminderRounds} from './
 const statusMessages={off:'Reminders are off.',ready:'Reminders are ready.',waiting:'Waiting for Canvas deadlines.',offline:'Offline: using deadlines synced less than 24 hours ago.',stale:'Reminders paused: deadlines have not synced for 24 hours.',auth:'Reminders paused: sign in to Canvas again.','notification-denied':'System notifications are blocked.'};
 const errorMessages={CONTEXT:'Reminder status is unavailable. Reload this Canvas page.',NOTIFICATION:'Notifications are blocked or unavailable.',STORAGE:'Could not save reminder state. Reminders are paused.',DELIVERY_UNCERTAIN:'A reminder delivery could not be confirmed. It will not be repeated.',IDENTITY:'Reminders paused: sign in to Canvas again.'};
 export function createReminderSettingsEditor({document,value,client,onChange}={}){
- const {el,input,field,select,button}=ui(document);
- let draft=normalizeReminderSettings(value),busy=false,testing=false,disposed=false,statusVersion=0;
- const element=el('section','reminder-settings settings-section'),rows=el('div','reminder-rounds');
+ const {el,input,field,select,button,disclosure,help}=ui(document);
+ let draft=normalizeReminderSettings(value),busy=false,testing=false,disposed=false,statusVersion=0,recoverConfiguration=false;
+ const element=disclosure('Deadline reminders','reminder-settings settings-section','Off'),rows=el('div','reminder-rounds');
+ const configuration=el('div','reminder-configuration');
+ const summaryValue=element.querySelector('.disclosure-value');let runtimeWarning='';
  const enabled=input('Enable deadline reminders','','checkbox');enabled.checked=draft.enabled;
  const count=select('Reminder rounds',[1,2,3,4,5].map(n=>[String(n),String(n),true]),String(draft.leadMinutes.length));
  const state=el('p','hint'),synced=el('p','hint'),feedback=el('p','hint');
  state.dataset.reminderStatus='';synced.dataset.reminderSynced='';feedback.dataset.reminderFeedback='';
  for(const node of [state,synced,feedback]){node.setAttribute('role','status');node.setAttribute('aria-live','polite');}
  const changed=()=>{if(!disposed)onChange?.(structuredClone(draft));};
- const applyDisabled=()=>{enabled.disabled=busy;count.disabled=busy||!draft.enabled;rows.querySelectorAll('input,select').forEach(n=>{n.disabled=busy||!draft.enabled;});test.disabled=busy||testing;};
+ const applyDisabled=()=>{const editable=draft.enabled||recoverConfiguration;enabled.disabled=busy;count.disabled=busy||!editable;configuration.hidden=!editable;rows.querySelectorAll('input,select').forEach(n=>{n.disabled=busy||!editable;});test.disabled=busy||testing;setText(summaryValue,runtimeWarning||(draft.enabled?'On':'Off'));summaryValue.classList.toggle('summary-warning',Boolean(runtimeWarning));};
  function draw(){
   count.value=String(draft.leadMinutes.length);rows.replaceChildren();
   draft.leadMinutes.forEach((minutes,index)=>{
@@ -30,8 +32,9 @@ export function createReminderSettingsEditor({document,value,client,onChange}={}
   const ticket=++statusVersion;let reply;
   try{reply=client?await client.getStatus():{ok:false};}catch{reply={ok:false,code:'CONTEXT'};}
   if(disposed||ticket!==statusVersion)return;
-  if(!reply?.ok){setText(state,errorMessages[reply?.code]||'Reminder status is unavailable.');setText(synced,'');return;}
-  const status=reply.status||{};setText(state,status.state==='error'?(errorMessages[status.errorCode]||'Could not update deadline reminders.'):(statusMessages[status.state]||'Waiting for Canvas deadlines.'));
+  if(!reply?.ok){runtimeWarning=errorMessages[reply?.code]||'Reminder status is unavailable.';setText(state,runtimeWarning);setText(synced,'');applyDisabled();return;}
+  const status=reply.status||{};const message=status.state==='error'?(errorMessages[status.errorCode]||'Could not update deadline reminders.'):(statusMessages[status.state]||'Waiting for Canvas deadlines.');setText(state,message);
+  runtimeWarning=['offline','stale','auth','notification-denied','error'].includes(status.state)?message:'';applyDisabled();
   if(Number.isFinite(status.lastSyncedAt))setText(synced,{key:'Last synced: {time}',values:{time:new Intl.DateTimeFormat(intlLocale(document),{dateStyle:'medium',timeStyle:'short'}).format(new Date(status.lastSyncedAt))}});
   else setText(synced,'No deadlines synced yet.');
  };
@@ -44,11 +47,12 @@ export function createReminderSettingsEditor({document,value,client,onChange}={}
  });
  enabled.addEventListener('change',()=>{if(disposed)return;draft.enabled=enabled.checked;changed();applyDisabled();});
  count.addEventListener('change',()=>{if(disposed)return;draft.leadMinutes=resizeReminderRounds(draft.leadMinutes,Number(count.value));changed();draw();});
- element.append(el('h2','','Deadline reminders'),field('Enable deadline reminders',enabled),
-  el('p','hint','Desktop reminders for upcoming Canvas assignment deadlines in your selected calendars. Submitted and completed tasks are skipped.'),
-  field('Reminder rounds',count),rows,el('p','hint','Choose 1–5 rounds, each 1 minute to 30 days early. Times are sorted and duplicates are merged when saved.'),
-  el('p','hint','Keep the browser running. Canvas tabs can be closed. After sleep or restart, only the latest missed round is sent before the deadline. Browser or system settings may delay notifications.'),
-  el('p','hint','Save planning settings to apply changes.'),state,synced,test,feedback);
+ configuration.append(field('Reminder rounds',count),rows);
+ element.append(field('Enable deadline reminders',enabled),configuration,state,test,feedback,
+  help('Desktop reminders for upcoming Canvas assignment deadlines in your selected calendars. Submitted and completed tasks are skipped.',
+   'Choose 1–5 rounds, each 1 minute to 30 days early. Times are sorted and duplicates are merged when saved.',
+   'Keep the browser running. Canvas tabs can be closed. After sleep or restart, only the latest missed round is sent before the deadline. Browser or system settings may delay notifications.'));
+ element.querySelector('.help-disclosure').append(synced);
  draw();void refreshStatus();
- return {element,setValue(settings){if(disposed)return;draft=normalizeReminderSettings(settings);enabled.checked=draft.enabled;draw();},setBusy(value){busy=value;applyDisabled();},refreshStatus,dispose(){disposed=true;statusVersion++;}};
+ return {element,setValue(settings){if(disposed)return;draft=normalizeReminderSettings(settings);enabled.checked=draft.enabled;recoverConfiguration=false;draw();},revealInvalid(){if(disposed)return;recoverConfiguration=true;element.open=true;applyDisabled();},setBusy(value){busy=value;applyDisabled();},refreshStatus,dispose(){disposed=true;statusVersion++;}};
 }

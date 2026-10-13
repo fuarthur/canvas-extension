@@ -1,5 +1,5 @@
 import { ui, formatMinutes } from "./ui.js";
-import { intlLocale } from "./i18n.js";
+import { intlLocale, translate } from "./i18n.js";
 import { validDay } from "./dates.js";
 import { resolveEstimate } from "./estimates.js";
 import { taskList, taskGroup, taskDate, isHistoricalTask, isOverdueTask, isTaskComplete, historyCutoff, targetInstant, validateTaskPreferences, defaultTaskPreferences } from "./tasks.js";
@@ -43,9 +43,12 @@ function createTasksController(options) {
     selected.clear();
     savePreferences();
   }
-  async function apply(patch) {
+  async function apply(patch, requestedKeys = [...selected]) {
     if (busy) return;
-    let keys = [...selected];
+    const initiatingFocus=root.getRootNode().activeElement||document.activeElement;
+    const focusId=root.contains(initiatingFocus)?initiatingFocus.dataset?.controlId:null;
+    let succeeded=false;
+    let keys = requestedKeys;
     if (Object.hasOwn(patch, "completed")) keys = keys.filter((key) => !data.items.find((i) => i.key === key)?.canvasCompleted);
     if (!keys.length) {
       setNotice("Canvas completion is read-only.");
@@ -57,13 +60,20 @@ function createTasksController(options) {
     draw();
     try {
       undo = await options.onApply(keys, patch);
+      succeeded=true;
       selected.clear();
       setNotice("Task changes saved.", "success");
     } catch (error) {
       setNotice(error.message || "Could not save this change. Try again.");
     } finally {
       busy = false;
-      if (!destroyed) draw();
+      if (!destroyed) {
+        draw();
+        if(focusId){
+          const target=succeeded?'Undo task changes':focusId;
+          [...root.querySelectorAll('[data-control-id]')].find(node=>node.dataset.controlId===target)?.focus({preventScroll:true});
+        }
+      }
     }
   }
   async function undoChanges() {
@@ -193,7 +203,7 @@ function createTasksController(options) {
     const oldRange = root.querySelector(".task-range");
     if (oldRange) rangeOpen = oldRange.open;
     root.replaceChildren();
-    root.append(el("h2", "", "Task agenda"));
+    root.append(el("h2", "page-title", "Task list"));
     const shortcuts = el("div", "task-presets");
     for (const [preset, label, text] of [["all", "All tasks", "All tasks"], ["overdue", "Overdue H/W", "Overdue H/W"], ["today", "Today tasks", "Today"], ["week", "Next 7 days", "Next 7 days"], ["completed", "Completed tasks", "Completed"]]) {
       const node = button(label, () => filter({ preset, status: preset === "completed" ? "completed" : "remaining" }), "control", text);
@@ -203,6 +213,7 @@ function createTasksController(options) {
     root.append(shortcuts);
     const filters = el("div", "task-filters");
     const query = input("Search all tasks", preferences.query, "search");
+    query.placeholder=translate(document,'Search by title…');
     query.maxLength = 200;
     query.addEventListener("input", () => filter({ query: query.value }));
     filters.append(field("Search tasks", query), field("Course / calendar", select("Tasks course", [["all", "All courses / calendars"], ...(data.contexts || []).map((c) => [c.code, c.name, true])], preferences.course, (value) => filter({ course: value }))));
@@ -225,15 +236,16 @@ function createTasksController(options) {
     for (const [key, id] of [["type", "Tasks type"], ["status", "Tasks completion"], ["sort", "Tasks sort"], ["group", "Tasks grouping"]]) {
       if (preferences[key] !== defaultTaskPreferences()[key]) {
         const chosen = advancedFields.querySelector(`[data-control-id="${id}"]`).selectedOptions[0];
-        filterSummary.append(el("span", "filter-chip", chosen.textContent, true));
+        filterSummary.append(button(`Reset ${id}`,()=>filter({[key]:defaultTaskPreferences()[key],...(key==='status'&&preferences.preset==='completed'?{preset:'all'}:{})}),'filter-chip',`${chosen.textContent} ×`));
       }
     }
     root.append(filters, filterSummary);
     const history = data.items.filter((i) => isHistoricalTask(i, data.state, facts())).length, cutoff = historyCutoff(data.state.settings?.historyFilter, now(), options.timeZone);
-    if (cutoff) {
+    const scope=el('div','task-scope');
+    if (cutoff && (history || preferences.showHistory)) {
       const line = el("div", "task-history");
       line.append(el("span", "hint", `${history} historical tasks \xB7 before ${cutoff}`), button(preferences.showHistory ? "Hide historical tasks" : "Show historical tasks", () => filter({ showHistory: !preferences.showHistory }), "text-button", preferences.showHistory ? "Hide history" : "View history"));
-      root.append(line);
+      scope.append(line);
     }
     if (data.loadedRange) {
       const range = el("details", "task-range");
@@ -259,9 +271,10 @@ function createTasksController(options) {
         if (root.contains(range)) rangeOpen = range.open;
       });
       range.open = rangeOpen;
-      root.append(range);
+      range.append(el('p','hint',options.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone,true));
+      scope.append(range);
     }
-    root.append(el("p", "hint", options.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone, true));
+    root.append(scope);
     const visible = rows(), keys = new Set(visible.map((i) => i.key));
     for (const key of selected) if (!keys.has(key)) selected.delete(key);
     const selectAll = input("Select all filtered tasks", "", "checkbox");
@@ -273,7 +286,7 @@ function createTasksController(options) {
       if (selectAll.checked) for (const item of visible) selected.add(item.key);
       draw();
     });
-    root.append(field("Select all filtered results", selectAll), el("p", "hint", `${visible.length} tasks`));
+    const listTools=el('div','task-list-tools');listTools.append(field("Select all", selectAll), el("span", "hint", `${visible.length} tasks`));root.append(listTools);
     if (selected.size) root.append(bulkTools(visible));
     if (notice) {
       const message = el("p", noticeKind === "success" ? "success" : "notice", notice);
@@ -316,12 +329,19 @@ function createTasksController(options) {
         else if (complete) status.append(el("span", "hint", "Completed"));
         else if (isOverdueTask(item, data.state, now())) status.append(el("span", "urgency-tag red", "Overdue"));
         if (isHistoricalTask(item, data.state, facts())) status.append(el("span", "hint", "Historical task"));
+        if(!item.canvasCompleted && !selected.size){
+          const label=`${complete?'Reopen':'Complete'} ${item.title}`;
+          const quick=button(label,()=>apply({completed:!complete},[item.key]),'quick-complete',complete?'↶':'✓');
+          quick.title=translate(document,label);status.append(quick);
+        }
         row.append(checkbox, title, meta, status);
         group.append(row);
       }
       root.append(group);
     }
-    if (!visible.length) root.append(el("p", "empty-state", "No tasks match your filters."));
+    if (!visible.length) {
+      const empty=el('div','empty-state');empty.append(el('p','','No tasks match your filters.'),button('Reset task filters',()=>filter(defaultTaskPreferences()),'control','Reset filters'));root.append(empty);
+    }
     if (busy) {
       root.setAttribute("aria-busy", "true");
       for (const node of root.querySelectorAll("button,input,select")) node.disabled = true;

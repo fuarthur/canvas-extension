@@ -9,6 +9,36 @@ import {createCanvasLoader} from '../src/canvas-api.js';
 const fixture = JSON.parse(await readFile(new URL('./fixtures/canvas-pages.json', import.meta.url)));
 const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url)));
 
+test('view tabs use one keyboard stop, arrow navigation and an explicitly labelled panel', async () => {
+  const { dom, host, planner } = setup();
+  await planner.show();
+  const root = host.shadowRoot;
+  let tabs = [...root.querySelectorAll('[role="tab"]')];
+  assert.deepEqual(tabs.map(tab => tab.tabIndex), [0, -1, -1, -1, -1]);
+  tabs[0].focus();
+  tabs[0].dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+  assert.equal(root.activeElement, tabs[4]);
+  assert.equal(tabs[0].getAttribute('aria-selected'), 'true', 'Arrow navigation must not discard a draft by activating a tab');
+  root.activeElement.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  tabs = [...root.querySelectorAll('[role="tab"]')];
+  assert.equal(tabs[4].getAttribute('aria-selected'), 'true');
+  assert.equal(root.querySelector('[role="tabpanel"]').getAttribute('aria-labelledby'), tabs[4].id);
+  tabs[4].dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+  assert.equal(root.activeElement, tabs[0]);
+  planner.destroy();
+  dom.window.close();
+});
+
+test('Escape dismisses the open plan action list before leaving the planner',async()=>{
+  const {dom,host,planner,click}=setup();await planner.show();await click('Planner view');await click('New plan');
+  const menu=host.shadowRoot.querySelector('.plan-more-actions');menu.open=true;menu.querySelector('summary').focus();
+  dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+  assert.equal(menu.open,false);assert.equal(host.isConnected,true);assert.equal(host.shadowRoot.querySelector('[role="alertdialog"]'),null);
+  assert.equal(host.shadowRoot.activeElement,menu.querySelector('summary'));
+  planner.destroy();dom.window.close();
+});
+
 test('initial selection reads only checked native Canvas calendars, with an API fallback when absent', () => {
   const dom = new JSDOM(`<ul>
     <li class="context_list_context" data-context="course_1"><span role="checkbox" aria-checked="true"></span></li>
@@ -322,8 +352,8 @@ test('Today and day highlight use the Canvas profile time zone', async () => {
 
 test('calendar pressure badges open the deadline list and completion updates locally without fetching',async()=>{
  let calls=0;const {host,planner,click,dom}=setup(async()=>{calls++;return {profile:fixture.profile,contexts:[{code:'course_1',name:'Course 1'}],events:[],assignments:[{...fixture.assignment,assignment:fixture.assignmentDetail}],range:{startDate:'2026-03-01',endDate:'2027-03-31'}};});
- await planner.toggle();const badge=host.shadowRoot.querySelector('[data-pressure-day="2026-09-20"]');assert.ok(badge);assert.equal(badge.textContent,'1 to do');badge.click();assert.match(host.shadowRoot.querySelector('[aria-label="Tasks for 2026-09-20"]').textContent,/Essay/);
- host.shadowRoot.querySelector('[aria-label="Open Essay"]').click();await click('Mark complete');assert.equal(host.shadowRoot.querySelector('[data-pressure-day="2026-09-20"]').textContent,'No tasks');
+ await planner.toggle();const badge=host.shadowRoot.querySelector('[data-pressure-day="2026-09-20"]');assert.ok(badge);assert.equal(badge.textContent,'1');assert.equal(badge.hidden,false);badge.click();assert.match(host.shadowRoot.querySelector('[aria-label="Tasks for 2026-09-20"]').textContent,/Essay/);
+ host.shadowRoot.querySelector('[aria-label="Open Essay"]').click();await click('Mark complete');assert.equal(host.shadowRoot.querySelector('[data-pressure-day="2026-09-20"]').hidden,true);
  await click('Workload view');assert.match(host.shadowRoot.textContent,/0 tasks/);assert.equal(calls,1);dom.window.close();
 });
 

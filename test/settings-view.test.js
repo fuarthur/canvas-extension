@@ -1,6 +1,48 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {JSDOM} from 'jsdom';
 import {renderPlanningSettings} from '../src/settings-view.js';import {planningState} from './helpers/planning.js';
 const settle=()=>new Promise(r=>setTimeout(r,0));
+test('settings mark typed values as unsaved and summarize them before blur',async()=>{
+ const dom=new JSDOM('<main/>');let saved;
+ const root=renderPlanningSettings({document:dom.window.document,state:planningState(),contexts:[],onSave:async value=>{saved=value;}});
+ dom.window.document.querySelector('main').append(root);
+ const type=async(label,value)=>{const node=root.querySelector(`[data-control-id="${label}"]`);node.value=value;node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));await settle();};
+ await type('Default estimate minutes','90');
+ assert.equal(root.querySelector('[data-settings-dirty]').textContent,'Unsaved changes');
+ assert.equal(root.querySelector('.estimate-default-settings .disclosure-value').textContent,'90 min');
+ await type('Mon capacity minutes','90');
+ root.querySelector('[data-control-id="Save planning settings"]').click();await settle();
+ assert.equal(saved.defaultMinutes,90);assert.equal(saved.schedule.weekdays[1].maxMinutes,90);
+ assert.equal(root.querySelector('[data-settings-dirty]').textContent,'Changes apply when saved');dom.window.close();
+});
+test('invalid loading values stay reachable when the loading mode changes',async()=>{
+ const dom=new JSDOM('<main/>');let saved;
+ const root=renderPlanningSettings({document:dom.window.document,state:planningState(),contexts:[],onSave:async value=>{saved=value;}});
+ dom.window.document.querySelector('main').append(root);
+ const months=root.querySelector('[data-control-id="Months before current month"]');
+ months.value='13';months.dispatchEvent(new dom.window.Event('change',{bubbles:true}));
+ const mode=root.querySelector('[data-control-id="Calendar loading mode"]');mode.value='semester';mode.dispatchEvent(new dom.window.Event('change',{bubbles:true}));
+ root.querySelector('[data-control-id="Save planning settings"]').click();await settle();
+ assert.equal(saved,undefined);assert.equal(root.querySelector('.calendar-loading-settings').open,true);
+ assert.equal(months.disabled,false);assert.equal(months.closest('.form-grid').hidden,false);assert.equal(months.value,'13');
+ months.value='2';months.dispatchEvent(new dom.window.Event('change',{bubbles:true}));
+ assert.equal(months.closest('.form-grid').hidden,false,'keep recovery fields visible while editing');
+ root.querySelector('[data-control-id="Save planning settings"]').click();await settle();
+ assert.equal(saved.calendarLoading.mode,'semester');assert.equal(saved.calendarLoading.pastMonths,2);dom.window.close();
+});
+test('collapsed loading settings reveal invalid input and keep the draft until a successful save',async()=>{
+ const dom=new JSDOM('<main/>');let saved;
+ const root=renderPlanningSettings({document:dom.window.document,state:planningState(),contexts:[],onSave:async value=>{saved=value;}});
+ dom.window.document.querySelector('main').append(root);
+ const loading=root.querySelector('.calendar-loading-settings');assert.equal(loading.tagName,'DETAILS');assert.equal(loading.open,false);
+ loading.open=true;const months=root.querySelector('[data-control-id="Months before current month"]');
+ months.value='13';months.dispatchEvent(new dom.window.Event('change',{bubbles:true}));loading.open=false;
+ root.querySelector('[data-control-id="Save planning settings"]').click();await settle();
+ assert.equal(saved,undefined);assert.equal(loading.open,true);assert.equal(months.value,'13');
+ assert.match(root.querySelector('[data-planning-settings-status]').textContent,/loading/i);
+ months.value='2';months.dispatchEvent(new dom.window.Event('change',{bubbles:true}));
+ root.querySelector('[data-control-id="Save planning settings"]').click();await settle();assert.equal(saved.calendarLoading.pastMonths,2);
+ dom.window.close();
+});
 test('native calendar completion is opt-in and saves with planning settings',async()=>{
  const dom=new JSDOM('');let saved;
  const root=renderPlanningSettings({document:dom.window.document,state:planningState(),contexts:[],onSave:async value=>{saved=value;}});

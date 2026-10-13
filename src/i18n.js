@@ -8,6 +8,14 @@ export const intlLocale = (document, english = 'en-US') => getLanguage(document)
 export function setLanguage(document, value) { languages.set(document, validLanguage(value) ? value : 'en'); }
 
 const zh = {
+  'How it works':'使用说明','On':'已开启','Off':'已关闭','Extra semesters':'其他学期',
+  'Saved automatically':'自动保存','Save changes':'保存更改','Changes apply when saved':'修改后需保存',
+  'Generate':'生成安排','Plan settings':'计划设置','Search by title…':'搜索任务名称…',
+  'Search tasks…':'搜索任务…','Sort & filter':'排序与筛选','Arrange your week':'安排这一周',
+  'Create a plan, then generate a schedule or arrange tasks yourself.':'新建计划后，可自动生成安排，也可手动安排任务。',
+  'Filters active':'已启用筛选','Create first plan':'新建第一个计划',
+  'Reset Tasks type':'清除任务类型筛选','Reset Tasks completion':'清除完成状态筛选',
+  'Reset Tasks sort':'恢复默认排序','Reset Tasks grouping':'取消分组',
   'Deadline reminders':'截止提醒','Enable deadline reminders':'启用截止提醒','Reminder rounds':'提醒轮数','Before deadline':'提前时间','Unit':'单位',
   'Hours':'小时','Days':'天','Send test reminder':'发送测试提醒','Duplicate times were merged.':'重复的提醒时间已合并。',
   'Desktop reminders for upcoming Canvas assignment deadlines in your selected calendars. Submitted and completed tasks are skipped.':'通过桌面通知提醒所选日历中即将截止的 Canvas 作业，已提交和已完成的任务会跳过。',
@@ -170,7 +178,7 @@ const zh = {
   'From':'开始', 'Until':'结束', 'Date overrides':'指定日期设置', 'Override date':'指定日期', 'Add date override':'添加日期设置',
   'Manual':'手动估时', 'Default':'默认估时', 'Delete':'删除', 'Remove':'移除',
   'Deadline workload':'截止日工作量', 'Assignments count on their deadline; calendar events count on their start date. Completed items are excluded.':'作业计入截止日，日历活动计入开始日；已完成项目不计入。',
-  'Remaining':'剩余任务', 'Estimated work':'预计总耗时', 'Overdue':'已逾期', 'Tasks':'任务数量', 'Estimated hours':'预计小时数',
+  'Remaining':'剩余任务', 'Estimated work':'预计总耗时', 'Overdue':'已逾期', 'Tasks':'任务', 'Estimated hours':'预计小时数',
   'Show task count':'显示任务数量', 'Show estimated hours':'显示预计小时数', 'No remaining tasks on this date.':'当天没有未完成任务。',
   'Peak day · No remaining tasks this month.':'峰值日期 · 本月没有未完成任务。',
   'Daily task count':'每日任务数量', 'Daily estimated hours':'每日预计小时数', 'Date':'日期', 'View daily data':'查看每日数据', 'No data':'无数据',
@@ -262,6 +270,9 @@ const zh = {
 };
 
 const templates = {
+  '{n} before · {count} after':'前 {n} 个月 · 后 {count} 个月',
+  '{n} rules':'{n} 条规则','{n} selected':'已选 {n} 项','{n} months':'{n} 个月','{n} days':'{n} 天',
+  '{n} overdue':'{n} 项逾期','Today · {n} remaining':'今天 · {n} 项待完成',
   'Reminder {n}':'第 {n} 轮','Reminder {n} amount':'第 {n} 轮提前数值','Reminder {n} unit':'第 {n} 轮时间单位','Last synced: {time}':'上次同步：{time}',
   '{count} tasks · {duration}':'{count} 项任务 · {duration}',
   'Page {page} / {pages} · {count} tasks':'第 {page} / {pages} 页 · {count} 项任务',

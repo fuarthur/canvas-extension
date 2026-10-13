@@ -24,6 +24,17 @@ test('typing an amount updates the draft before blur',async()=>{
  change(dom,root,'Enable deadline reminders',true);const amount=control(root,'Reminder 1 amount');amount.value='4';amount.dispatchEvent(new dom.window.Event('input'));
  control(root,'Save planning settings').click();await settle();assert.equal(saved.reminders.leadMinutes[0],240);assert.equal(control(root,'Reminder 1 amount').value,'4');root.dispose();dom.window.close();
 });
+test('invalid reminder amounts remain editable after reminders are turned off',async()=>{
+ const dom=new JSDOM('');let saved;
+ const root=renderPlanningSettings({document:dom.window.document,state:planningState(),contexts:[],onSave:async value=>{saved=value;}});
+ change(dom,root,'Enable deadline reminders',true);change(dom,root,'Reminder 1 amount','0');change(dom,root,'Enable deadline reminders',false);
+ control(root,'Save planning settings').click();await settle();assert.equal(saved,undefined);
+ assert.equal(root.querySelector('.reminder-settings').open,true);assert.equal(root.querySelector('.reminder-configuration').hidden,false);
+ assert.equal(control(root,'Reminder 1 amount').disabled,false);assert.equal(control(root,'Reminder 1 amount').value,'0');
+ change(dom,root,'Reminder 1 amount','2');assert.equal(root.querySelector('.reminder-configuration').hidden,false);
+ control(root,'Save planning settings').click();await settle();assert.deepEqual(saved.reminders,{enabled:false,leadMinutes:[120]});
+ assert.equal(root.querySelector('.reminder-configuration').hidden,true);root.dispose();dom.window.close();
+});
 test('drafts survive status updates failed saves and validation',async()=>{
  const dom=new JSDOM(''),d=defer();let attempts=0,saved;
  const root=renderPlanningSettings({document:dom.window.document,state:planningState(),contexts:[],reminderClient:{getStatus:()=>d.promise},onSave:async s=>{attempts++;if(attempts===1)throw new Error('Could not save settings.');saved=s;}});

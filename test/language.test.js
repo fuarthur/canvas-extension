@@ -52,7 +52,7 @@ test('Chinese calendar, workload and task details preserve Canvas titles and loc
  assert.equal(control(s.root,'Estimated effort minutes').getAttribute('aria-label'),'预计耗时（分钟）');
  await s.change('Estimated effort minutes','0');assert.match(s.root.textContent,/1.*1440.*分钟/);await s.click('Close details');
  await s.click('Workload view');assert.match(s.root.textContent,/截止日工作量/);assert.match(s.root.textContent,/1小时/);
- assert.equal(s.root.querySelector('svg').getAttribute('aria-label'),'每日任务数量');s.destroy();
+ assert.equal(s.root.querySelector('svg[role="img"]').getAttribute('aria-label'),'每日任务数量');s.destroy();
 });
 
 test('changing language preserves a dirty planner draft, original task text and editable work blocks',async()=>{
