@@ -203,9 +203,9 @@ function createTasksController(options) {
     const oldRange = root.querySelector(".task-range");
     if (oldRange) rangeOpen = oldRange.open;
     root.replaceChildren();
-    root.append(el("h2", "page-title", "Task list"));
+    root.append(el("h2", "visually-hidden", "Task list"));
     const shortcuts = el("div", "task-presets");
-    for (const [preset, label, text] of [["all", "All tasks", "All tasks"], ["overdue", "Overdue H/W", "Overdue H/W"], ["today", "Today tasks", "Today"], ["week", "Next 7 days", "Next 7 days"], ["completed", "Completed tasks", "Completed"]]) {
+    for (const [preset, label, text] of [["all", "All tasks", "All"], ["overdue", "Overdue H/W", "Overdue"], ["today", "Today tasks", "Today"], ["week", "Next 7 days", "Next 7 days"], ["completed", "Completed tasks", "Completed"]]) {
       const node = button(label, () => filter({ preset, status: preset === "completed" ? "completed" : "remaining" }), "control", text);
       node.setAttribute("aria-pressed", String(preferences.preset === preset));
       shortcuts.append(node);
@@ -239,6 +239,7 @@ function createTasksController(options) {
         filterSummary.append(button(`Reset ${id}`,()=>filter({[key]:defaultTaskPreferences()[key],...(key==='status'&&preferences.preset==='completed'?{preset:'all'}:{})}),'filter-chip',`${chosen.textContent} ×`));
       }
     }
+    if (preferences.showHistory) filterSummary.append(button("Reset history filter", () => filter({ showHistory: false }), "filter-chip", "History included ×"));
     root.append(filters, filterSummary);
     const history = data.items.filter((i) => isHistoricalTask(i, data.state, facts())).length, cutoff = historyCutoff(data.state.settings?.historyFilter, now(), options.timeZone);
     const scope=el('div','task-scope');
@@ -274,7 +275,7 @@ function createTasksController(options) {
       range.append(el('p','hint',options.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone,true));
       scope.append(range);
     }
-    root.append(scope);
+    advanced.append(scope);
     const visible = rows(), keys = new Set(visible.map((i) => i.key));
     for (const key of selected) if (!keys.has(key)) selected.delete(key);
     const selectAll = input("Select all filtered tasks", "", "checkbox");
@@ -302,6 +303,7 @@ function createTasksController(options) {
     }
     for (const [heading, items] of groups) {
       const group = el("section", "task-group");
+      if (preferences.group === "date" && heading === "Overdue") group.classList.add("overdue-group");
       group.dataset.taskGroup = heading;
       if (heading) group.append(el("h3", "", heading, preferences.group === "course" && heading !== "Personal"));
       for (const item of items) {
@@ -318,7 +320,11 @@ function createTasksController(options) {
         const title = el("div", "agenda-title");
         title.append(button(`Open ${item.title}`, () => options.onOpenItem?.(item.key), "task-title", item.title), el("p", "hint", item.contexts?.join(" \xB7 "), true));
         const meta = el("div", "agenda-meta");
-        meta.append(el("span", "", item.type === "assignment" ? "Deadline" : "Activity starts"), el("span", "", formatDate(taskDate(item)), true), el("span", "", formatMinutes(resolveEstimate(item, data.state).minutes)));
+        const deadline = el("div", "agenda-deadline");
+        const date = el("time", "", formatDate(taskDate(item)), true);
+        if (taskDate(item)) date.dateTime = taskDate(item);
+        deadline.append(el("span", "", item.type === "assignment" ? "Due" : "Starts"), date);
+        meta.append(deadline, el("span", "agenda-effort", formatMinutes(resolveEstimate(item, data.state).minutes)));
         const target = data.state.targets?.[item.key];
         if (target) {
           meta.append(el("span", "", "Planned finish"), el("span", "", target.time ? formatDate(targetInstant(target, options.timeZone)) : target.day, true));
@@ -327,7 +333,7 @@ function createTasksController(options) {
         const status = el("div", "agenda-status");
         if (item.canvasCompleted) status.append(el("span", "hint", "Completed in Canvas"));
         else if (complete) status.append(el("span", "hint", "Completed"));
-        else if (isOverdueTask(item, data.state, now())) status.append(el("span", "urgency-tag red", "Overdue"));
+        else if (isOverdueTask(item, data.state, now()) && !(preferences.group === "date" && heading === "Overdue")) status.append(el("span", "urgency-tag red", "Overdue"));
         if (isHistoricalTask(item, data.state, facts())) status.append(el("span", "hint", "Historical task"));
         if(!item.canvasCompleted && !selected.size){
           const label=`${complete?'Reopen':'Complete'} ${item.title}`;

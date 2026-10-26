@@ -72,6 +72,8 @@ export function themePalette(value, systemDark = false) {
     'chart-2': dark ? '#75d5c6' : '#20796f', 'chart-3': dark ? '#f1c078' : '#9b6418',
     'chart-4': dark ? '#f39bbe' : '#b13c69'
   };
+  palette['assignment-subtle-bg'] = mix(surface, palette['assignment-bg'], .45);
+  palette['assignment-subtle-text'] = readable(palette['assignment-text'], palette['assignment-subtle-bg']);
   for (const kind of ['success', 'warning', 'error']) {
     palette[`${kind}-message`] = readable(palette[`${kind}-text`], surface);
     palette[`${kind}-on-bg`] = readable(palette[`${kind}-text`], background);

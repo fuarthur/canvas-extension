@@ -48,7 +48,7 @@ test('completing from the block editor persists and updates every block, the poo
     assert.equal(s.root.querySelectorAll('.week-block-completed').length, 2);
     assert.equal(s.root.querySelector('[data-pool-task="assignment:1"]'), null);
     assert.match(s.root.querySelectorAll('.week-day-header')[4].textContent, /0 tasks · 0 min/);
-    assert.match(s.root.textContent, /Saved plan/);
+    assert.equal(s.root.querySelector('.plan-meta .draft-notice').textContent, '');
     assert.ok(s.control('Reopen task in editor'));
     assert.equal(s.dom.window.document.activeElement, s.control('Reopen task in editor'));
     await s.click('Reopen task in editor');

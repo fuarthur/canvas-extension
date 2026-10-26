@@ -349,16 +349,21 @@ function createPlannerController(options) {
       }
       const name = input("Plan name", draft.name, "text", (value) => change({ type: "rename", name: value }));
       name.maxLength = 120;
-      const saveStatus = el("p", dirty ? "draft-notice" : "hint", dirty ? "Unsaved changes" : "Saved plan");
+      const saveStatus = el("span", "draft-notice", dirty ? "Unsaved changes" : "");
+      saveStatus.setAttribute("role", "status");
       name.addEventListener("input", () => {
         draft = updatePlan(draft, { type: "rename", name: name.value });
         mark(true);
         saveStatus.className = "draft-notice";
         setText(saveStatus, "Unsaved changes");
       });
-      const planHeading=el('div','plan-heading');planHeading.append(field("Plan name", name),saveStatus);root.append(planHeading);
       const configuration = el("details", "plan-configuration");
-      configuration.append(el("summary", "", "Plan settings"),el("p", "hint plan-range", `Loaded range \xB7 ${draft.range.startDate} \u2013 ${draft.range.endDate}`));
+      const configurationSummary = el("summary", "", "Plan settings");
+      configurationSummary.dataset.controlId = "Expand plan settings";
+      configuration.append(configurationSummary, field("Plan name", name));
+      const planMeta = el("div", "plan-meta");
+      planMeta.append(el("span", "plan-range", `${draft.range.startDate} – ${draft.range.endDate}`, true), saveStatus);
+      root.append(planMeta);
       const range = { ...draft.range };
       const schedule = structuredClone(draft.schedule);
       let thresholdMinutes=nonSplitThreshold(draft);
@@ -582,7 +587,8 @@ function createPlannerController(options) {
         const last = lastEndByTask.get(item.key);
         const urgent = taskUrgency(item, { now: now(), lastEndAt: last, completed: false });
         row.classList.add(`urgency-${urgent.level}`);
-        row.append(button(`Open ${item.title}`, () => onOpenItem?.(item.key), "task-title", item.title), el("p", "hint", item.contexts.join(" \xB7 "), true), el("p", "hint", `${formatMinutes(estimate(item))} \xB7 ${item.type === "event" ? "Fixed activity" : `${amount(item.key)}/${estimate(item)} min arranged`}`));
+        const effort = item.type === "event" ? `${formatMinutes(estimate(item))} \xB7 Fixed activity` : amount(item.key) ? `${amount(item.key)}/${estimate(item)} min arranged` : formatMinutes(estimate(item));
+        row.append(button(`Open ${item.title}`, () => onOpenItem?.(item.key), "task-title", item.title), el("p", "hint", item.contexts.join(" \xB7 "), true), el("p", "hint", effort));
         if (urgent.label) row.append(urgencyTag(urgent));
         if (isHistoricalTask(item, data.state, { now: now(), timeZone: options.timeZone })) row.append(el("span", "hint", "Historical task"));
         if (item.type === "assignment") {

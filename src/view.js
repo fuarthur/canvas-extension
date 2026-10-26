@@ -714,8 +714,7 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
     setLabel(shell, "Planning calendar");
     const header = el("header", "header");
     const identity = el("div", "identity");
-    const brand = el('span','brand-icon');brand.append(icon('planner'));
-    identity.append(brand, el("h1", "", "Planning calendar"));
+    identity.append(el("h1", "", "Planning calendar"));
     header.append(identity);
     const controls = el("div", "controls");
     if (activeTab === "calendar" || activeTab === "workload") {
@@ -731,7 +730,6 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
     setLabel(tabs, "Planner views");
     for (const [tab, name, label] of [["calendar", "Calendar", "Planning calendar view"], ["tasks", "Tasks", "Task list view"], ["workload", "Workload", "Workload view"], ["planner", "Planner", "Planner view"], ["settings", "Settings", "Calendar settings"]]) {
       const button = action(label, name, () => changeTab(tab), "tab");
-      button.prepend(icon(tab));
       button.id = `planner-tab-${tab}`;
       button.tabIndex = activeTab === tab ? 0 : -1;
       button.setAttribute("role", "tab");
@@ -784,11 +782,13 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
         body.append(message);
       }
       for (const warning of planningState.warnings) body.append(el("p", "notice", warning));
-      const pressure = workloadSummary(items, combinedState(), { now: typeof now === "function" ? now() : now, timeZone: snapshot.profile.time_zone, range: monthRange() });
-      const todaySummary = el("div", "today-summary");
-      todaySummary.append(el('span','',`Today · ${pressure.today.tasks} remaining`));
-      body.append(todaySummary);
-      todaySummary.append(action("View overdue homework", `${pressure.overdue.length} overdue`, showOverdue, pressure.overdue.length?'overdue-shortcut':'text-button'));
+      if (activeTab === "calendar") {
+        const pressure = workloadSummary(items, combinedState(), { now: typeof now === "function" ? now() : now, timeZone: snapshot.profile.time_zone, range: monthRange() });
+        const todaySummary = el("div", "today-summary");
+        todaySummary.append(el('span','',`Today · ${pressure.today.tasks} remaining`));
+        if (pressure.overdue.length) todaySummary.append(action("View overdue homework", `${pressure.overdue.length} overdue`, showOverdue, 'overdue-shortcut'));
+        body.append(todaySummary);
+      }
       if (activeTab === "tasks") body.append(taskListController(items).render());
       else if (activeTab === "workload") body.append(renderWorkloadView({ document, items: activeItems(items), state: combinedState(), range: monthRange(), now: typeof now === "function" ? now() : now, timeZone: snapshot.profile.time_zone, onOpenItem: (key) => {
         selectedKey = key;

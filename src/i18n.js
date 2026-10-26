@@ -8,6 +8,9 @@ export const intlLocale = (document, english = 'en-US') => getLanguage(document)
 export function setLanguage(document, value) { languages.set(document, validLanguage(value) ? value : 'en'); }
 
 const zh = {
+  'Due':'截止','Expand plan settings':'展开计划设置',
+  'All':'全部任务','History included ×':'已包含历史任务 ×',
+  'Reset history filter':'取消包含历史任务',
   'How it works':'使用说明','On':'已开启','Off':'已关闭','Extra semesters':'其他学期',
   'Saved automatically':'自动保存','Save changes':'保存更改','Changes apply when saved':'修改后需保存',
   'Generate':'生成安排','Plan settings':'计划设置','Search by title…':'搜索任务名称…',

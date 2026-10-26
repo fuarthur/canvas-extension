@@ -145,6 +145,7 @@ test('a delayed save response cannot roll back a newer theme saved by another pa
 test('custom colors retain readable semantic messages and charts even when base and brightness differ',()=>{
  for(const [base,background,surface,text] of [['dark','#ffffff','#ffffff','#000000'],['light','#111111','#111111','#ffffff'],['dark','#777777','#777777','#ffffff']]){
   const palette=themePalette({preset:'custom',custom:{base,background,surface,text,accent:'#f4b860'}}).variables;
+  assert.ok(contrastRatio(palette['assignment-subtle-text'],palette['assignment-subtle-bg'])>=4.5,'quiet assignment bars stay readable');
   for(const kind of ['success','warning','error']){
    assert.ok(contrastRatio(palette[`${kind}-message`],surface)>=4.5,`${kind} message on ${surface}`);
    assert.ok(contrastRatio(palette[`${kind}-on-bg`],background)>=4.5,`${kind} message on page background`);
