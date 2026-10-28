@@ -14,6 +14,19 @@ test('searching and estimate sorting filter real tasks and retain typing focus',
  const search=s.root.querySelector('[aria-label="Search tasks"]');search.focus();s.change('Search tasks',' hpdl ','input');assert.equal(s.root.querySelectorAll('[data-pool-task]').length,1);assert.match(s.root.querySelector('[data-pool-task]').textContent,/HPDL/);assert.equal(s.dom.window.document.activeElement.getAttribute('aria-label'),'Search tasks');
  s.change('Task course','course_456');assert.equal(s.root.querySelectorAll('[data-pool-task]').length,0);s.dom.window.close();
 });
+
+test('a fixed event across the repeated DST hour retains its actual duration in the week view',async()=>{
+ const event=task({key:'event:1',type:'event',title:'Early meeting',startDay:'2026-11-01',endDay:'2026-11-01',dueAt:null,fixedStartAt:'2026-11-01T01:30:00-05:00',fixedEndAt:'2026-11-01T01:30:00-06:00'});
+ const s=await setup([event]);s.controller.destroy();
+ const controller=createPlannerController({...s.options,now:()=>new Date('2026-11-01T05:00:00Z')});
+ const root=controller.render();s.dom.window.document.querySelector('main').append(root);
+ try{
+  root.querySelector('[data-control-id="New plan"]').click();await settle();
+  const block=root.querySelector('[data-plan-day="2026-11-01"] [data-fixed-event="event:1"]');
+  assert.ok(block);assert.equal(block.style.top,'144px');assert.equal(block.style.height,'96px');
+  assert.equal(block.draggable,false);
+ }finally{controller.destroy();s.dom.window.close();}
+});
 test('unsaved exit supports return and discard while failed saves preserve drafts',async()=>{
  const s=await setup();await s.click('New plan');const leaving=s.controller.requestLeave();assert.ok(s.root.querySelector('[role="alertdialog"]'));await s.click('Return to editing');assert.equal(await leaving,false);
  const next=s.controller.requestLeave();await s.click('Discard draft changes');assert.equal(await next,true);
@@ -48,6 +61,41 @@ test('failed plan deletion retains the active plan and unfinished archived-task 
   assert.equal(s.root.querySelector('[data-control-id="Work start time"]').value,'12:15');assert.match(s.root.textContent,/Could not delete this plan/);
   const plans=(await s.store.loadPlanningState()).plans;assert.deepEqual(plans,{[s.kept.id]:s.kept,[s.removed.id]:s.removed});
  }finally{s.controller.destroy();s.dom.window.close();}
+});
+
+test('plan deletion survives a storage notification arriving before the background reply',async()=>{
+ const s=await savedPlansWithArchivedEditor();
+ const remove=s.options.planClient.remove;let release,calls=0;
+ s.options.planClient.remove=async(...args)=>{
+  calls++;const result=await remove(...args);
+  s.controller.setData({state:await s.store.loadPlanningState()});
+  await new Promise(resolve=>{release=resolve;});return result;
+ };
+ try{
+  await s.click('Delete plan');await s.click('Confirm delete plan');await until(()=>release);
+  const confirm=s.root.querySelector('[data-control-id="Confirm delete plan"]');
+  assert.equal(confirm.disabled,true);confirm.click();assert.equal(calls,1);
+  release();await until(()=>!s.root.querySelector('[role="alertdialog"]'));
+  assert.equal(s.root.querySelector('[data-control-id="Plan name"]').value,'Keep this plan');
+  assert.equal(s.root.querySelector('.arrange-editor'),null);
+  assert.deepEqual((await s.store.loadPlanningState()).plans,{[s.kept.id]:s.kept});
+ }finally{release?.();s.controller.destroy();s.dom.window.close();}
+});
+
+test('a delayed deletion reply preserves edits to another selected plan',async()=>{
+ const s=await savedPlansWithArchivedEditor();
+ const remove=s.options.planClient.remove;let release;
+ s.options.planClient.remove=async(...args)=>{const result=await remove(...args);await new Promise(resolve=>{release=resolve;});return result;};
+ try{
+  await s.click('Delete plan');await s.click('Confirm delete plan');await until(()=>release);
+  s.change('Saved plans',s.kept.id);await settle();s.change('Plan name','Keep my new edits','input');
+  release();await until(()=>!s.root.querySelector('[role="alertdialog"]'));
+  assert.equal(s.root.querySelector('[data-control-id="Plan name"]').value,'Keep my new edits');
+  assert.match(s.root.querySelector('.draft-notice').textContent,/Unsaved/);
+  await s.click('Save plan');
+  const plans=(await s.store.loadPlanningState()).plans;
+  assert.deepEqual(Object.keys(plans),[s.kept.id]);assert.equal(plans[s.kept.id].name,'Keep my new edits');
+ }finally{release?.();s.controller.destroy();s.dom.window.close();}
 });
 
 test('generated previews are separate from drafts until accepted and stale estimates prevent applying',async()=>{

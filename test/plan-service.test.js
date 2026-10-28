@@ -24,6 +24,32 @@ test('corrupt and unknown schemas are preserved but not treated as valid plans',
  const area=memoryStorage();area.entries['canvas-planner:canvas.illinois.edu:77:settings:v1']={schemaVersion:9};area.entries['canvas-planner:canvas.illinois.edu:77:plan:old']={schemaVersion:9};
  const state=await createPlannerStore(area,'canvas.illinois.edu',77).loadPlanningState();assert.equal(state.settings.defaultMinutes,60);assert.deepEqual(state.plans,{});assert.equal(state.warnings.length,2);assert.ok(area.entries['canvas-planner:canvas.illinois.edu:77:plan:old']);
 });
+test('a null work block in one archive does not prevent loading other planning data',async()=>{
+ const area=memoryStorage(),prefix='canvas-planner:canvas.illinois.edu:77:plan:';
+ const broken=plan({id:'broken',segments:[null]}),healthy=plan();
+ await area.set({[prefix+'broken']:broken,[prefix+healthy.id]:healthy});
+ const store=createPlannerStore(area,'canvas.illinois.edu',77);
+ await store.setEstimate('assignment:1',90);
+ const state=await store.loadPlanningState();
+ assert.deepEqual(Object.keys(state.plans),['plan-1']);
+ assert.equal(state.estimates['assignment:1'],90);
+ assert.equal(state.warnings.length,1);
+ assert.match(state.warnings[0],/broken/);
+ assert.deepEqual(area.entries[prefix+'broken'],broken);
+});
+test('a plan request containing a null work block is rejected without mutating storage',async()=>{
+ const area=memoryStorage(),service=createPlanService({storageArea:area});
+ const result=await service.handle({type:'PLAN_SAVE',userId:77,plan:plan({segments:[null]}),expectedRevision:0},sender);
+ assert.equal(result.code,'INVALID');
+ assert.deepEqual(area.entries,{});
+});
+test('an archive extending to the last supported date is rejected without interrupting recovery',async()=>{
+ const area=memoryStorage(),key='canvas-planner:canvas.illinois.edu:77:plan:far-future';
+ const broken=plan({id:'far-future',range:{startDate:'2026-10-01',endDate:'9999-12-31'}});
+ await area.set({[key]:broken});
+ const state=await createPlannerStore(area,'canvas.illinois.edu',77).loadPlanningState();
+ assert.deepEqual(state.plans,{});assert.equal(state.warnings.length,1);assert.deepEqual(area.entries[key],broken);
+});
 test('foreign senders and invalid archive fields cannot mutate storage',async()=>{
  const area=memoryStorage();const service=createPlanService({storageArea:area});
  for(const s of [{url:'https://evil.example/calendar'},{url:'https://canvas.illinois.edu/courses/1'}])assert.equal((await service.handle({type:'PLAN_SAVE',userId:77,plan:plan(),expectedRevision:0},s)).code,'INVALID');

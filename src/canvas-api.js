@@ -1,4 +1,4 @@
-import {validDay,daysBetween,dateKey,addDays} from './dates.js';
+import {validDay,dayCount,dateKey,addDays} from './dates.js';
 import {calendarLoadingRange,normalizeCalendarLoading,visibleCalendarRange} from './calendar-loading.js';
 import {createCalendarCache,SNAPSHOT_RETENTION_MS} from './calendar-cache.js';
 const ORIGIN = 'https://canvas.illinois.edu';
@@ -143,7 +143,7 @@ async function fetchCalendarBatch(fetchImpl, type, codes, range) {
 
 export async function loadCanvasSnapshot({ fetchImpl = fetch, month, readSelection, readLoadingSettings, persistentCache, cache = new Map(), snapshots = new Map(), pending = new Map(), generations = new Map(), now = Date.now, force = false, onCached, onPartial, retryUnavailable = false, range: requestedRange }) {
   try {calendarLoadingRange(month);}catch {throw new CanvasApiError('DATA','Invalid calendar month.');}
-  if(requestedRange&&(!validDay(requestedRange.startDate)||!validDay(requestedRange.endDate)||requestedRange.endDate<requestedRange.startDate||daysBetween(requestedRange.startDate,requestedRange.endDate).length>732))throw new CanvasApiError('DATA','Invalid planning date range.');
+  if(requestedRange&&(!validDay(requestedRange.startDate)||!validDay(requestedRange.endDate)||requestedRange.endDate<requestedRange.startDate||dayCount(requestedRange.startDate,requestedRange.endDate)>732))throw new CanvasApiError('DATA','Invalid planning date range.');
   let profile;
   try { profile = (await getJson(fetchImpl, `${ORIGIN}/api/v1/users/self/profile`)).body; }
   catch(error) { if(error.code==='AUTH'){snapshots.clear();cache.clear();pending.clear();generations.clear();await persistentCache?.clear().catch(()=>{});} throw error; }

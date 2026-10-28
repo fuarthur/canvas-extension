@@ -213,6 +213,13 @@ test('explicit planner ranges are honored before requests and invalid dates are 
  await assert.rejects(()=>loader('2026-10',{range:{startDate:'2026-02-30',endDate:'2026-03-01'}}));
 });
 
+test('an extreme calendar range is rejected as invalid before any Canvas request',async()=>{
+ let calls=0;
+ const loader=canvasApi.createCanvasLoader({fetchImpl:async()=>{calls++;throw new Error('Unexpected request');}});
+ await assert.rejects(loader('2026-10',{range:{startDate:'2026-10-01',endDate:'9999-12-31'}}),error=>error instanceof CanvasApiError&&error.code==='DATA');
+ assert.equal(calls,0);
+});
+
 test('calendar transport failures retain verified profile metadata for local archive recovery',async()=>{
  const fake=async url=>{const path=new URL(url).pathname;if(path.endsWith('/profile'))return json(fixture.profile);if(path.endsWith('/calendar_events'))return new Response('',{status:500});return json([]);};
  await assert.rejects(()=>loadCanvasSnapshot({fetchImpl:fake,month:'2026-10',readSelection:async()=>['user_77']}),error=>{assert.equal(error.snapshot?.profile.id,77);assert.deepEqual(error.snapshot.events,[]);return true;});

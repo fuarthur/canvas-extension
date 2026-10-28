@@ -338,10 +338,10 @@ function createPlannerController(options) {
         editing = null;
         draw();
       }), button("Delete plan", () => {
-        prompt = { kind: "delete" };
+        prompt = { kind: "delete", id: draft.id, revision: draft.revision, name: draft.name };
         draw();
       }, "text-button", "Delete"));
-      toolbar.querySelector('[data-control-id="Save plan"]').disabled = saving;
+      toolbar.querySelector('[data-control-id="Save plan"]').disabled = saving || prompt?.saving === true;
       if (options.schedulerClient) {
         toolbar.append(button("Generate balanced plan", generate, dirty||preview ? "control" : "control primary", generating ? "Generating\u2026" : "Generate"));
         toolbar.querySelector('[data-control-id="Generate balanced plan"]').disabled = generating;
@@ -489,28 +489,39 @@ function createPlannerController(options) {
           finishPrompt(true);
         }, "text-button"), button("Return to editing", () => finishPrompt(false), "text-button"));
       } else {
-        dialog.append(el("h3", "", `Delete \u201C${draft?.name}\u201D?`), el("p", "hint", "This removes only this saved plan."), button("Confirm delete plan", async () => {
-          if (archives[draft.id]) {
-            const result = await planClient.remove(draft.id, draft.revision);
-            if (!result.ok) {
-              notice = result.message;
-              prompt = null;
-              draw();
-              return;
-            }
-            delete archives[draft.id];
-            delete data.state.plans[draft.id];
-            compared.delete(draft.id);
+        const deletion = prompt;
+        const confirm = button("Confirm delete plan", async () => {
+          if (deletion.saving || saving || destroyed || prompt !== deletion) return;
+          deletion.saving = true;
+          draw();
+          let result;
+          try {
+            result = archives[deletion.id] ? await planClient.remove(deletion.id, deletion.revision) : { ok: true };
+          } catch (error) {
+            result = { ok: false, message: error.message };
           }
-          draft = Object.values(archives)[0] ? structuredClone(Object.values(archives)[0]) : null;
-          editing = null;
-          mark(false);
+          if (destroyed) return;
+          if (result?.ok) {
+            delete archives[deletion.id];
+            delete data.state.plans[deletion.id];
+            compared.delete(deletion.id);
+            if (!draft || draft.id === deletion.id) {
+              draft = Object.values(archives)[0] ? structuredClone(Object.values(archives)[0]) : null;
+              editing = null;
+              conflict = false;
+              mark(false);
+            }
+          } else notice = result?.message || "Could not delete this plan.";
+          if (prompt === deletion) prompt = null;
+          draw();
+        });
+        confirm.disabled = deletion.saving === true || saving;
+        const cancel = button("Cancel delete plan", () => {
           prompt = null;
           draw();
-        }), button("Cancel delete plan", () => {
-          prompt = null;
-          draw();
-        }, "text-button"));
+        }, "text-button");
+        cancel.disabled = deletion.saving === true;
+        dialog.append(el("h3", "", `Delete \u201C${deletion.name}\u201D?`), el("p", "hint", "This removes only this saved plan."), confirm, cancel);
       }
       root.append(dialog);
     }

@@ -14,3 +14,17 @@ test('task grids use actual integer values and workload identifies the peak day'
  const dom=new JSDOM('');const chart=renderLineChart({document:dom.window.document,series:[{name:'A',points:[{day:'2026-10-01',tasks:1,minutes:60}]}]});assert.deepEqual([...chart.querySelectorAll('svg text[text-anchor="end"]')].map(n=>n.textContent),['0','1']);
  const view=renderWorkloadView({document:dom.window.document,items:[task()],state:planningState(),range:{startDate:'2026-10-01',endDate:'2026-10-03'},now:'2026-10-01T12:00:00Z',timeZone:'America/Chicago'});assert.match(view.textContent,/Peak day.*2026-10-03/);
 });
+
+test('the workload peak follows the selected metric and keeps the first day for ties',()=>{
+ const dom=new JSDOM('');
+ try{
+  const items=[task({endDay:'2026-10-01'}),task({key:'assignment:2',endDay:'2026-10-02'}),task({key:'assignment:3',endDay:'2026-10-02'}),task({key:'assignment:4',endDay:'2026-10-03'})];
+  const state=planningState({estimates:{'assignment:1':240,'assignment:2':10,'assignment:3':10,'assignment:4':240}});
+  const root=renderWorkloadView({document:dom.window.document,items,state,range:{startDate:'2026-10-01',endDate:'2026-10-03'},now:'2026-10-01T12:00:00Z',timeZone:'America/Chicago'});
+  assert.match(root.textContent,/Peak day · 2026-10-02/);
+  root.querySelector('[aria-label="Show estimated hours"]').click();
+  assert.match(root.textContent,/Peak day · 2026-10-01/);
+  root.querySelector('[aria-label="Show task count"]').click();
+  assert.match(root.textContent,/Peak day · 2026-10-02/);
+ }finally{dom.window.close();}
+});

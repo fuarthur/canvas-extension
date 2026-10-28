@@ -73,7 +73,9 @@ export function renderPlannerWeek({document,plan,startDay,today,points,segmentsB
   for(const event of events){
    const first=Date.parse(event.fixedStartAt),last=Date.parse(event.fixedEndAt);
    if(!Number.isFinite(first)||!Number.isFinite(last)||last<dayStart||first>=dayEnd||last===dayStart&&first<last)continue;
-   const start=first<=dayStart?0:clockMinutes(first,plan.timeZone),end=last>=dayEnd?1440:clockMinutes(last,plan.timeZone);
+   const start=first<=dayStart?0:clockMinutes(first,plan.timeZone);
+   let end=last>=dayEnd?1440:clockMinutes(last,plan.timeZone);
+   if(end<=start)end=Math.min(1440,start+(Math.min(last,dayEnd)-Math.max(first,dayStart))/60000);
    blocks.push({start,end:Math.max(start+15,end),task:event});
   }
   for(const block of placeBlocks(blocks)){

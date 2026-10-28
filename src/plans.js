@@ -1,10 +1,10 @@
-import {dateKey,daysBetween} from './dates.js';
+import {dateKey,daysBetween,dayCount} from './dates.js';
 import {resolveEstimate} from './estimates.js';
 import {validateSchedule,validMinutes,nonSplitThreshold} from './planning-settings.js';
 import {isHistoricalTask} from './tasks.js';
 export function snapshotTask(item,state){const allowSplitting=state.allowSplitting?.[item.key]===true;return {...structuredClone(item),estimateMinutes:resolveEstimate(item,state).minutes,allowSplitting,singleSession:!allowSplitting,completedAtSave:Boolean(item.completed||state.completed?.[item.key])};}
 export function createPlan({id,name,items,state,startDate,endDate,timeZone,now}){
- if(daysBetween(startDate,endDate).length>180||validateSchedule(state.settings.schedule).length)throw new Error('Choose a valid plan range of 1–180 days.');
+ if(dayCount(startDate,endDate)>180||validateSchedule(state.settings.schedule).length)throw new Error('Choose a valid plan range of 1–180 days.');
  const tasks={};for(const item of items){if(item.completed||state.completed?.[item.key]||isHistoricalTask(item,state,{now,timeZone}))continue;const included=item.type==='assignment'?item.endDay<=endDate:item.startDay<=endDate&&item.endDay>=startDate;if(included)tasks[item.key]=snapshotTask(item,state);}
  const stamp=new Date(now).toISOString();return {schemaVersion:1,id,name,revision:0,createdAt:stamp,updatedAt:stamp,timeZone,range:{startDate,endDate},schedule:structuredClone(state.settings.schedule),nonSplitThresholdMinutes:nonSplitThreshold(state.settings),tasks,segments:[],basisFingerprint:''};
 }
@@ -12,7 +12,7 @@ export function copyPlan(plan,{id,name,now}){const stamp=new Date(now).toISOStri
 export function updatePlan(plan,op){
  const p=structuredClone(plan);switch(op.type){
  case 'rename':p.name=op.name;break;
- case 'configure':if(daysBetween(op.range.startDate,op.range.endDate).length>180||validateSchedule(op.schedule).length||(op.nonSplitThresholdMinutes!=null&&!validMinutes(op.nonSplitThresholdMinutes)))throw new Error('Choose a valid range, working capacities and non-splitting threshold.');p.range=structuredClone(op.range);p.schedule=structuredClone(op.schedule);if(op.nonSplitThresholdMinutes!=null)p.nonSplitThresholdMinutes=op.nonSplitThresholdMinutes;break;
+ case 'configure':if(dayCount(op.range.startDate,op.range.endDate)>180||validateSchedule(op.schedule).length||(op.nonSplitThresholdMinutes!=null&&!validMinutes(op.nonSplitThresholdMinutes)))throw new Error('Choose a valid range, working capacities and non-splitting threshold.');p.range=structuredClone(op.range);p.schedule=structuredClone(op.schedule);if(op.nonSplitThresholdMinutes!=null)p.nonSplitThresholdMinutes=op.nonSplitThresholdMinutes;break;
  case 'addTask':p.tasks[op.task.key]=structuredClone(op.task);break;
  case 'removeTask':delete p.tasks[op.itemKey];p.segments=p.segments.filter(s=>s.itemKey!==op.itemKey);break;
  case 'addSegment':if(p.segments.some(s=>s.id===op.segment.id))throw new Error('Duplicate segment.');p.segments.push(structuredClone(op.segment));break;

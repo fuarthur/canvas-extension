@@ -1,4 +1,4 @@
-import {setLabel} from './i18n.js';
+import {setLabel,setText} from './i18n.js';
 import {workloadSummary} from './workload.js';import {renderLineChart} from './chart-view.js';import {resolveEstimate} from './estimates.js';import {ui,formatMinutes} from './ui.js';
 export function renderDayList({document,day,items,state,onOpenItem,onComplete}){
  const {el,button}=ui(document);const panel=el('section','day-list');setLabel(panel,`Tasks for ${day}`);panel.append(el('h2','',day));
@@ -8,9 +8,9 @@ export function renderDayList({document,day,items,state,onOpenItem,onComplete}){
 export function renderWorkloadView({document,items,state,range,now,timeZone,onOpenItem,onComplete}){
  const {el,button,help}=ui(document);const panel=el('section','workload-view');const summary=workloadSummary(items,state,{now,timeZone,range});let metric='tasks';let selectedDay=null;
  panel.append(el('h2','','Deadline workload'));
- const cards=el('div','summary-cards');for(const [title,value]of [['Remaining',`${summary.totalTasks} tasks`],['Estimated work',formatMinutes(summary.totalMinutes)],['Overdue',`${summary.overdue.length} tasks`]]){const card=el('div','summary-card');card.append(el('span','hint',title),el('strong','',value));cards.append(card);}panel.append(cards,el('p','hint',summary.peakDay?`Peak day · ${summary.peakDay}`:'Peak day · No remaining tasks this month.'));
+ const cards=el('div','summary-cards');for(const [title,value]of [['Remaining',`${summary.totalTasks} tasks`],['Estimated work',formatMinutes(summary.totalMinutes)],['Overdue',`${summary.overdue.length} tasks`]]){const card=el('div','summary-card');card.append(el('span','hint',title),el('strong','',value));cards.append(card);}const peakLabel=el('p','hint');panel.append(cards,peakLabel);
  const tools=el('div','view-tools');const chart=el('div');const dayPanel=el('div');
- const draw=()=>{for(const node of tools.querySelectorAll('button'))node.setAttribute('aria-pressed',String(node.dataset.controlId===(metric==='tasks'?'Show task count':'Show estimated hours')));chart.replaceChildren(renderLineChart({document,series:[{id:'deadline',name:'Deadline workload',localizeName:true,colorRole:1,color:'#6154b4',points:summary.series}],metric,onSelectDay:day=>{selectedDay=day;drawDay();}}));};
+ const draw=()=>{const peak=summary.series.reduce((best,point)=>point[metric]>(best?.[metric]??0)?point:best,null);setText(peakLabel,peak?`Peak day · ${peak.day}`:'Peak day · No remaining tasks this month.');for(const node of tools.querySelectorAll('button'))node.setAttribute('aria-pressed',String(node.dataset.controlId===(metric==='tasks'?'Show task count':'Show estimated hours')));chart.replaceChildren(renderLineChart({document,series:[{id:'deadline',name:'Deadline workload',localizeName:true,colorRole:1,color:'#6154b4',points:summary.series}],metric,onSelectDay:day=>{selectedDay=day;drawDay();}}));};
  const drawDay=()=>{const point=summary.series.find(p=>p.day===selectedDay);dayPanel.replaceChildren(renderDayList({document,day:selectedDay,items:items.filter(i=>point?.itemKeys.includes(i.key)),state,onOpenItem,onComplete}));};
  tools.append(button('Show task count',()=>{metric='tasks';draw();},'control','Tasks'),button('Show estimated hours',()=>{metric='minutes';draw();},'control','Estimated hours'));panel.append(tools,chart,dayPanel,help('Assignments count on their deadline; calendar events count on their start date. Completed items are excluded.'));draw();return panel;
 }

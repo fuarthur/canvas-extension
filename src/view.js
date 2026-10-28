@@ -540,18 +540,21 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
     if (!themeEditor || themeEditorUserId !== snapshot.profile.id) {
       themeEditorUserId = snapshot.profile.id;
       const capturedStore = planningStore;
-      themeEditor = createThemeSettings({ document, value: planningState.theme, scope:planningState.themeScope, onSave: async (theme) => {
+      const capturedUser = snapshot.profile.id;
+      const current = () => open && themeEditor === editor && String(snapshot?.profile.id) === String(capturedUser);
+      const editor = createThemeSettings({ document, value: planningState.theme, scope:planningState.themeScope, onSave: async (theme) => {
         await capturedStore.setTheme(theme);
-        if (!open || planningStore !== capturedStore) return;
+        if (!current()) return;
         // A different page may have saved a newer choice before this write returned.
         await refreshLocal();
-        return planningState.theme;
+        if (current()) return planningState.theme;
       }, onSaveScope:async(scope)=>{
         await capturedStore.setThemeScope(scope);
-        if(!open||planningStore!==capturedStore)return;
+        if(!current())return;
         await refreshLocal();
-        return planningState.themeScope;
+        if(current())return planningState.themeScope;
       } });
+      themeEditor = editor;
     }
     themeEditor.update(planningState.theme,planningState.themeScope);
     localizeTree(themeEditor.element);

@@ -2,7 +2,7 @@ import {validLanguage} from './i18n.js';
 import {defaultTheme,validTheme,normalizeTheme} from './themes.js';
 import {appearanceAccountKey,loadInitialAppearance,normalizeThemeScope,validThemeScope,saveThemeScope} from './appearance.js';
 import {defaultSettings,validateSettings,validateSchedule,validMinutes} from './planning-settings.js';
-import {validDay,daysBetween} from './dates.js';
+import {validDay,dayCount} from './dates.js';
 import {validTarget,defaultTaskPreferences,validateTaskPreferences} from './tasks.js';
 import {defaultReminderSettings,validateReminderSettings} from './reminder-settings.js';
 const taskQueues=new WeakMap();
@@ -133,11 +133,11 @@ export const validItemKey=key=>typeof key==='string'&&/^(assignment|event):[A-Za
 export const validInstant=value=>typeof value==='string'&&Number.isFinite(Date.parse(value))&&/[TZ+-]/.test(value);
 export function isPlanRecord(p){
  if(!p||p.schemaVersion!==1||!validPlanId(p.id)||typeof p.name!=='string'||!p.name.trim()||p.name.length>120||!Number.isInteger(p.revision)||p.revision<0||!validInstant(p.createdAt)||!validInstant(p.updatedAt)||!validDay(p.range?.startDate)||!validDay(p.range?.endDate)||p.range.endDate<p.range.startDate||typeof p.timeZone!=='string'||validateSchedule(p.schedule).length||!p.tasks||typeof p.tasks!=='object'||Array.isArray(p.tasks)||!Array.isArray(p.segments))return false;
- if(daysBetween(p.range.startDate,p.range.endDate).length>180)return false;
+ if(dayCount(p.range.startDate,p.range.endDate)>180)return false;
  if(p.nonSplitThresholdMinutes!=null&&!validMinutes(p.nonSplitThresholdMinutes))return false;
  try {new Intl.DateTimeFormat('en',{timeZone:p.timeZone});}catch{return false;}
  for(const [key,t] of Object.entries(p.tasks))if(!validItemKey(key)||t?.key!==key||!['event','assignment'].includes(t.type)||typeof t.title!=='string'||!validMinutes(t.estimateMinutes)||!Array.isArray(t.contextCodes)||!Array.isArray(t.contexts)||typeof t.singleSession!=='boolean')return false;
  for(const t of Object.values(p.tasks))if(t.allowSplitting!=null&&typeof t.allowSplitting!=='boolean')return false;
- const ids=new Set();for(const s of p.segments){if(!validPlanId(s.id)||ids.has(s.id)||!p.tasks[s.itemKey]||!validInstant(s.startAt)||!validInstant(s.endAt)||Date.parse(s.endAt)<=Date.parse(s.startAt)||typeof s.locked!=='boolean'||!Number.isFinite(s.order))return false;ids.add(s.id);}
+ const ids=new Set();for(const s of p.segments){if(!s||!validPlanId(s.id)||ids.has(s.id)||!p.tasks[s.itemKey]||!validInstant(s.startAt)||!validInstant(s.endAt)||Date.parse(s.endAt)<=Date.parse(s.startAt)||typeof s.locked!=='boolean'||!Number.isFinite(s.order))return false;ids.add(s.id);}
  return true;
 }

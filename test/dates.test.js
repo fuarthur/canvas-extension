@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dateKey, monthWeeks, weekSegments } from '../src/dates.js';
+import { dateKey, monthWeeks, weekSegments, dayCount, daysBetween } from '../src/dates.js';
 
 test('monthWeeks returns complete Sunday-to-Saturday rows', () => {
   const weeks = monthWeeks('2026-09');
@@ -25,4 +25,18 @@ test('dateKey uses Canvas profile time zone across midnight and daylight saving'
   assert.equal(dateKey('2026-09-01T02:00:00Z', 'America/Chicago'), '2026-08-31');
   assert.equal(dateKey('2026-03-08T07:30:00Z', 'America/Chicago'), '2026-03-08');
   assert.equal(dateKey('2026-03-08T07:30:00Z', 'America/Los_Angeles'), '2026-03-07');
+});
+
+test('inclusive day counts preserve plan and calendar limits across leap years',()=>{
+ for(const [start,end,want] of [
+  ['2026-10-01','2026-10-01',1],['2026-10-01','2027-03-29',180],
+  ['2026-10-01','2027-03-30',181],['2026-10-01','2028-10-01',732],
+  ['2026-10-01','2028-10-02',733],['2028-02-28','2028-03-01',3],
+  ['0000-01-01','9999-12-31',3652425]
+ ])assert.equal(dayCount(start,end),want);
+ for(const [start,end] of [['2026-02-30','2026-03-01'],['2026-10-02','2026-10-01']])assert.throws(()=>dayCount(start,end),/Invalid date range/);
+});
+
+test('a date list ending on the last supported day does not advance beyond its range',()=>{
+ assert.deepEqual(daysBetween('9999-12-30','9999-12-31'),['9999-12-30','9999-12-31']);
 });

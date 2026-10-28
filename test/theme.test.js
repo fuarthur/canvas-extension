@@ -55,18 +55,18 @@ test('invalid theme writes cannot replace saved colors and corrupt preferences f
  const loaded=await store.loadPlanningState();assert.equal(loaded.theme.preset,'light');assert.ok(loaded.warnings.length);
 });
 
-async function setup({dark=false,subscribe=false}={}){
+async function setup({dark=false,subscribe=false,freshStores=false}={}){
  const dom=new JSDOM('<main>Native Calendar</main>',{url:'https://canvas.illinois.edu/calendar'});
  const document=dom.window.document,host=document.createElement('div'),area=memoryStorage();
  let userId=77,calls=0,storageChange;const listeners=new Set();
  const media={matches:dark,addEventListener(type,fn){assert.equal(type,'change');listeners.add(fn);},removeEventListener(type,fn){listeners.delete(fn);}};
  dom.window.matchMedia=()=>media;
- const stores=new Map(),getStore=id=>{if(!stores.has(id))stores.set(id,createPlannerStore(area,'canvas.illinois.edu',id));return stores.get(id);};
+ const stores=new Map(),getStore=id=>{if(freshStores)return createPlannerStore(area,'canvas.illinois.edu',id);if(!stores.has(id))stores.set(id,createPlannerStore(area,'canvas.illinois.edu',id));return stores.get(id);};
  const planner=mountPlanner({host,storeFactory:getStore,subscribeStorage:subscribe?(_scope,fn)=>{storageChange=fn;return()=>{storageChange=null;};}:undefined,initialMonth:'2026-10',now:()=>new Date('2026-10-01T12:00:00Z'),loadSnapshot:async()=>{calls++;return {profile:{id:userId,time_zone:'America/Chicago'},contexts:[{code:'course_456',name:'EPSY 456'}],events:[],assignments:[{id:'assignment_1',title:'Essay',context_code:'course_456',assignment:{due_at:'2026-10-03T23:59:00-05:00'}}],range:{startDate:'2026-10-01',endDate:'2026-12-31'}};}});
  await planner.show();const root=host.shadowRoot;
  const click=async id=>{const node=control(root,id);assert.ok(node,`Missing ${id}`);node.click();await settle();};
  const change=async(id,value)=>{const node=control(root,id);assert.ok(node,`Missing ${id}`);node.value=value;node.dispatchEvent(new dom.window.Event('change',{bubbles:true}));await settle();};
- return {dom,document,host,root,planner,click,change,get store(){return getStore(userId);},get calls(){return calls;},get listenerCount(){return listeners.size;},async systemDark(value){media.matches=value;for(const fn of listeners)fn({matches:value});await settle();},async switchAccount(id){userId=id;await click('Refresh calendar');},async notify(){storageChange?.({});await settle();},destroy(){planner.destroy();dom.window.close();}};
+ return {dom,document,host,root,planner,click,change,area,get store(){return getStore(userId);},get calls(){return calls;},get listenerCount(){return listeners.size;},async systemDark(value){media.matches=value;for(const fn of listeners)fn({matches:value});await settle();},async switchAccount(id){userId=id;await click('Refresh calendar');},async notify(){storageChange?.({});await settle();},destroy(){planner.destroy();dom.window.close();}};
 }
 
 test('all preset themes apply immediately without fetching Canvas or losing unsaved settings',async()=>{
@@ -139,6 +139,26 @@ test('a delayed save response cannot roll back a newer theme saved by another pa
  await write({...defaultTheme(),preset:'forest'});await s.notify();
  assert.equal(s.host.dataset.theme,'forest');release();await settle();await settle();
  assert.equal(s.host.dataset.theme,'forest');assert.equal(control(s.root,'Interface theme').value,'forest');assert.equal((await s.store.loadPlanningState()).theme.preset,'forest');
+ }finally{release?.();s.destroy();}
+});
+
+for(const [field,suffix,requested,newer] of [
+ ['Interface theme','theme:v1',{...defaultTheme(),preset:'dark'},{...defaultTheme(),preset:'forest'}],
+ ['Theme applies to','theme-scope:v1','planner','canvas']
+])test(`a same-account refresh keeps delayed ${field} saves consistent with another page`,async()=>{
+ const s=await setup({subscribe:true,freshStores:true});let release;
+ try{
+  await s.click('Calendar settings');await s.change('Default estimate minutes','77');await s.click('Refresh calendar');
+  const key=`canvas-planner:canvas.illinois.edu:77:${suffix}`,write=s.area.set;
+  const gate=new Promise(resolve=>{release=resolve;});
+  s.area.set=async values=>{await write(values);if(JSON.stringify(values[key])===JSON.stringify(requested))await gate;};
+  await s.change(field,typeof requested==='string'?requested:requested.preset);
+  assert.equal(control(s.root,field).disabled,true);
+  await write({[key]:newer});await s.notify();release();await settle();await settle();
+  assert.equal(control(s.root,field).value,typeof newer==='string'?newer:newer.preset);
+  assert.equal(control(s.root,field).disabled,false);
+  assert.equal(control(s.root,'Default estimate minutes').value,'77');
+  if(field==='Interface theme')assert.equal(s.host.dataset.theme,'forest');
  }finally{release?.();s.destroy();}
 });
 

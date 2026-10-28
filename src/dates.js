@@ -66,7 +66,13 @@ export function addDays(day,offset){
 }
 export function daysBetween(startDate,endDate){
  if(!validDay(startDate)||!validDay(endDate)||endDate<startDate)throw new Error('Invalid date range');
- const result=[];for(let day=startDate;day<=endDate;day=addDays(day,1))result.push(day);return result;
+ const result=[];for(let day=startDate;;day=addDays(day,1)){result.push(day);if(day===endDate)return result;}
+}
+
+// Count inclusive calendar days without allocating an array for range validation.
+export function dayCount(startDate,endDate){
+ if(!validDay(startDate)||!validDay(endDate)||endDate<startDate)throw new Error('Invalid date range');
+ return (Date.parse(`${endDate}T00:00:00Z`)-Date.parse(`${startDate}T00:00:00Z`))/86400000+1;
 }
 
 const zonedFormatters=new Map();
