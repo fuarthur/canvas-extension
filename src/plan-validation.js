@@ -1,4 +1,4 @@
-import {dateKey,zonedDateTime,startOfLocalDay} from './dates.js';import {buildAvailability} from './availability.js';import {resolvePlanTasks} from './plans.js';import {newId} from './ui.js';
+import {dateKey,zonedDateTime,startOfLocalDay,validDay,validInstant} from './dates.js';import {buildAvailability} from './availability.js';import {resolvePlanTasks} from './plans.js';import {newId} from './ui.js';
 import {isHistoricalTask} from './tasks.js';
 import {canSplitTask} from './planning-settings.js';
 export function taskBounds(task,plan,now){
@@ -13,6 +13,20 @@ export function validatePlan(plan,{items=[],completed={},now,loadedRange,state,h
  const ids=new Set();for(const segment of plan.segments){if(ids.has(segment.id))add('DUPLICATE_ID','Work block IDs must be unique.',{segmentId:segment.id});ids.add(segment.id);}
  for(const key of resolved.unknownKeys)add('UNKNOWN','Task is not currently loaded; its deadline cannot be verified.',{itemKey:key});
  for(const change of resolved.changes)add('STALE','Task timing changed; update the plan task data before generating.',{itemKey:change.itemKey});
+ // Validate task facts even when they have no work blocks. NaN comparisons
+ // otherwise let malformed releases disappear from the scheduling constraints.
+ const instant=validInstant;
+ for(const saved of Object.values(plan.tasks)){
+  if(resolved.tasks[saved.key]?.completed)continue;
+  const item=current.get(saved.key)||saved;
+  if(item.dataConflict)add('DATA_CONFLICT','Conflicting imported dates need a refresh before planning.',{itemKey:saved.key});
+  if(saved.type==='assignment'&&(!instant(item.dueAt)||(item.unlockAt!=null&&!instant(item.unlockAt))||(item.manualStartDay!=null&&!validDay(item.manualStartDay))))add('TASK_TIME','Task deadline or start time is invalid. Refresh Canvas data or correct the plan start date.',{itemKey:saved.key});
+  else if(saved.type==='assignment'&&item.unlockAt&&Date.parse(item.unlockAt)>Date.parse(item.dueAt))add('TASK_TIME','Task opens after its deadline. Check the Canvas dates before planning.',{itemKey:saved.key});
+ }
+ for(const event of fixedFacts(plan,items)){
+  if(event.invalidTime||!instant(event.fixedStartAt)||!instant(event.fixedEndAt)||Date.parse(event.fixedEndAt)<Date.parse(event.fixedStartAt))add('EVENT_TIME','A calendar activity has invalid or reversed times. Refresh Canvas data before planning.',{itemKey:event.key});
+  if(event.dataConflict)add('DATA_CONFLICT','Conflicting imported dates need a refresh before planning.',{itemKey:event.key});
+ }
  const availability=buildAvailability({range:plan.range,schedule:plan.schedule,timeZone:plan.timeZone,now,fixedEvents:fixedFacts(plan,items)});issues.push(...availability.issues);const days=new Map(availability.days.map(d=>[d.day,d]));const totals={},daily={},counts={};const pending=[];
  for(const segment of plan.segments){
   const saved=plan.tasks[segment.itemKey];if(!saved){add('UNKNOWN','Segment references a missing task.',{segmentId:segment.id});continue;}if(resolved.tasks[saved.key].completed)continue;

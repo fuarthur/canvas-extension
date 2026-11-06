@@ -29,7 +29,7 @@ export function resolvePlanTasks(plan,{items=[],completed={},state}){
  for(const [key,saved]of Object.entries(plan.tasks)){
   const item=live.get(key);tasks[key]={...saved,canvasCompleted:Boolean(item?item.canvasCompleted:saved.canvasCompleted),completed:Boolean(completed[key]||item?.completed),known:Boolean(item)};
   if(!item){unknownKeys.push(key);continue;}
-  const changed=['dueAt','unlockAt','manualStartDay','fixedStartAt','fixedEndAt'].filter(field=>(saved[field]??null)!==(item[field]??null));
+  const changed=['dueAt','unlockAt','manualStartDay','fixedStartAt','fixedEndAt','dataConflict','invalidTime'].filter(field=>(saved[field]??null)!==(item[field]??null));
   if(state&&saved.estimateMinutes!==resolveEstimate(item,state).minutes)changed.push('estimateMinutes');
   if(state&&Boolean(saved.allowSplitting)!==(state.allowSplitting?.[key]===true))changed.push('allowSplitting');
   if(changed.length)changes.push({itemKey:key,fields:changed});
@@ -70,4 +70,4 @@ export function taskUrgency(task,{now,lastEndAt,completed}){
  if(left<=72)return {level:'yellow',label:`Due in ${Math.ceil(left/24)}d`,reason:'due'};
  return {level:'none',label:`Due in ${Math.ceil(left/24)}d`,reason:null};
 }
-export function planFingerprint(plan,facts){return JSON.stringify([plan,facts.items?.map(i=>[i.key,i.dueAt,i.unlockAt,i.manualStartDay,i.fixedStartAt,i.fixedEndAt,i.completed,resolveEstimate(i,facts.state||{}).minutes]).sort((a,b)=>a[0].localeCompare(b[0])),facts.completed,facts.state?.allowSplitting,facts.loadedRange,facts.state?.settings?.historyFilter]);}
+export function planFingerprint(plan,facts){return JSON.stringify([plan,facts.items?.map(i=>[i.key,i.dueAt,i.unlockAt,i.manualStartDay,i.fixedStartAt,i.fixedEndAt,i.completed,i.dataConflict,i.invalidTime,resolveEstimate(i,facts.state||{}).minutes]).sort((a,b)=>a[0].localeCompare(b[0])),facts.completed,facts.state?.allowSplitting,facts.loadedRange,facts.state?.settings?.historyFilter]);}

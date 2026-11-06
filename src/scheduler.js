@@ -3,7 +3,7 @@ import {canSplitTask,scheduleBufferMinutes} from './planning-settings.js';
 const duration=s=>(Date.parse(s.endAt)-Date.parse(s.startAt))/60000;
 const cloneDays=days=>days.map(d=>({...d,intervals:d.intervals.map(i=>({...i}))}));
 export async function generateSchedule(input,{signal,onProgress=()=>{},yieldControl=()=>new Promise(r=>setTimeout(r,0)),budgetMs=5000,clock=Date.now}={}){
- const {plan,items=[],completed={},now,loadedRange,historyFilter}=input;const started=clock();const facts={items,completed,now,loadedRange,historyFilter};let counter=0,states=0,stop=null;let best=[];let before={peak:0,variance:0,buffer:0};let after=before;
+ const {plan,items=[],completed={},now,loadedRange,historyFilter}=input;const started=clock();const facts={items,completed,now,loadedRange,historyFilter};let counter=0,states=0,totalStates=0,searchLimitReached=false,stop=null;let best=[];let before={peak:0,variance:0,buffer:0};let after=before;
  const dayCache=new Map();const dayOf=instant=>{if(!dayCache.has(instant))dayCache.set(instant,dateKey(instant,plan.timeZone));return dayCache.get(instant);};
  function mergeSegments(segments){const merged=[];for(const s of [...segments].sort((a,b)=>Date.parse(a.startAt)-Date.parse(b.startAt)||a.id.localeCompare(b.id))){const previous=merged.at(-1);if(previous&&!previous.locked&&!s.locked&&previous.itemKey===s.itemKey&&previous.endAt===s.startAt&&dayOf(previous.startAt)===dayOf(s.startAt))previous.endAt=s.endAt;else merged.push({...s});}return merged;}
  const resolved=resolvePlanTasks(plan,facts);const retained=plan.segments.filter(s=>s.locked||resolved.tasks[s.itemKey]?.completed).map(s=>({...s}));best=retained;
@@ -21,7 +21,26 @@ export async function generateSchedule(input,{signal,onProgress=()=>{},yieldCont
  // timers are clamped by browsers and can consume the entire generation budget.
  let lastYield=-Infinity;
  const checkpoint=async force=>{if(signal?.aborted){stop='cancelled';return false;}const tick=clock();if(tick-started>budgetMs){stop='timeout';return false;}if(force&&tick-lastYield>=16){await yieldControl();lastYield=clock();if(signal?.aborted){stop='cancelled';return false;}if(lastYield-started>budgetMs){stop='timeout';return false;}}return true;};
- const finish=(segments=best)=>{const validation=checkSchedule(segments);const issues=[...validation.issues];for(const [itemKey,missingMinutes]of Object.entries(validation.unassigned))issues.push({code:'UNASSIGNED',itemKey,missingMinutes,message:canSplitTask(plan.tasks[itemKey],plan)?'Could not fit all estimated work before the deadline. Adjust capacity, dates or splitting.':'Could not find a continuous work interval for the full task estimate before the deadline. Adjust capacity or dates; splitting requires permission and an estimate above the threshold.'});if(Object.keys(validation.unassigned).length&&bufferMinutes>0)issues.push({code:'BUFFER_SPACE',message:'Automatic planning reserves buffer time between work blocks. Reduce the buffer or expand working windows if work remains unassigned.'});return {status:stop||(validation.complete?'complete':'partial'),segments,validation,issues,metrics:{beforePeakMinutes:before.peak,afterPeakMinutes:after.peak,beforeVariance:before.variance,afterVariance:after.variance}};};
+ const finish=(segments=best)=>{
+  const validation=checkSchedule(segments),issues=[...validation.issues];
+  const missing=Object.entries(validation.unassigned),blocked=validation.issues.some(issue=>issue.code!=='OVERDUE');
+  for(const [itemKey,missingMinutes] of missing){
+   const task=plan.tasks[itemKey],related=validation.issues.filter(issue=>issue.itemKey===itemKey);
+   let reason,message;
+   if(related.some(issue=>['TASK_TIME','DATA_CONFLICT','UNKNOWN','STALE'].includes(issue.code))){reason='TASK_DATA';message='Task dates need verification. Refresh or update task data before planning.';}
+   else if(related.some(issue=>issue.code==='OVERDUE')){reason='OVERDUE';message='The deadline has already passed. Review the task in Canvas and choose a new deadline before planning.';}
+   else if(blocked){reason='BLOCKED';message='Existing conflicts or invalid calendar data blocked calculation. Resolve the reported checks, then generate again.';}
+   else if(stop==='timeout'||searchLimitReached){reason='SEARCH_LIMIT';message='The calculation limit was reached before this work could be placed. Retry or simplify the plan; infeasibility has not been proven.';}
+   else if(canSplitTask(task,plan)){reason='CAPACITY_OR_WINDOWS';message='Could not fit all estimated work before the deadline. Adjust capacity, dates or splitting.';}
+   else {reason='CONTINUOUS_WINDOW';message='Could not find a continuous work interval for the full task estimate before the deadline. Adjust capacity or dates; splitting requires permission and an estimate above the threshold.';}
+   issues.push({code:'UNASSIGNED',reason,itemKey,missingMinutes,message});
+  }
+  if(missing.length&&searchLimitReached)issues.push({code:'SEARCH_LIMIT',message:'The bounded search reached its state limit. This partial result does not prove that no complete schedule exists. Try a shorter range or fewer tasks.'});
+  if(missing.length&&bufferMinutes>0)issues.push({code:'BUFFER_SPACE',message:'Automatic planning reserves buffer time between work blocks. Reduce the buffer or expand working windows if work remains unassigned.'});
+  return {status:stop||(validation.complete?'complete':'partial'),segments,validation,issues,
+   diagnostics:{visitedStates:totalStates,searchLimitReached,elapsedMs:Math.max(0,clock()-started)},
+   metrics:{beforePeakMinutes:before.peak,afterPeakMinutes:after.peak,beforeVariance:before.variance,afterVariance:after.variance}};
+ };
  if(!await checkpoint(true))return finish();
  // Overdue tasks stay visible; they do not stop scheduling other feasible tasks.
  if(checked.issues.some(i=>i.code!=='OVERDUE'))return finish();
@@ -86,7 +105,7 @@ export async function generateSchedule(input,{signal,onProgress=()=>{},yieldCont
  singles.sort((a,b)=>bounds.get(a.key).end-bounds.get(b.key).end||candidates(a,base.days).length-candidates(b,base.days).length||a.key.localeCompare(b.key));
  const assignedScore=segments=>segments.filter(s=>!resolved.tasks[s.itemKey]?.completed).reduce((n,s)=>n+duration(s),0);let bestScore=assignedScore(best);
  const balancedFeasible=segments=>{const v=checkSchedule(segments);return v.issues.every(i=>i.code==='OVERDUE')&&Object.keys(v.unassigned).every(key=>bounds.get(key).end<Date.parse(now));};
- async function search(index,days,placed,deferred,allowFallback){if(++states>2000||!await checkpoint(states%20===0))return false;
+ async function search(index,days,placed,deferred,allowFallback){totalStates++;if(++states>2000){searchLimitReached=true;return false;}if(!await checkpoint(states%20===0))return false;
   if(index===singles.length){const candidate=await pack(days,placed,deferred);const score=assignedScore(candidate);if(score>bestScore){best=candidate;bestScore=score;}return balancedFeasible(candidate);}
   const task=singles[index];const choices=candidates(task,days);for(const choice of choices){const segment=make(task.key,choice.start,needs.get(task.key));if(await search(index+1,occupy(days,segment),[...placed,segment],deferred,allowFallback))return true;if(stop||states>2000)break;}
   // Keep a partial preview that still arranges the remaining feasible work.

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Canvas study planner · interactive demo</title>
+  <link rel="stylesheet" href="./demo.css">
+  <script type="module" src="./demo.js"></script>
+</head>
+<body>
+  <header id="demo-toolbar">
+    <div class="demo-intro">
+      <div><h1>Canvas study planner</h1><p><strong>Demo · fictional data.</strong> No Canvas account needed. Saved changes stay in this browser.</p></div>
+      <label class="scenario-label">Scenario <select id="scenario"><option value="standard">A manageable study week</option><option value="capacity">Too much work, too little time</option></select></label>
+    </div>
+    <p class="demo-guide">Try an estimate in Tasks, adjust Plan settings, then Generate → Accept → Save. Complete a task and generate again.</p>
+    <div class="demo-actions" role="group" aria-label="Demo controls">
+      <button id="open" type="button">Open planner</button>
+      <button id="reset" type="button">Reset demo</button>
+      <button id="fail" type="button">Fail next save</button>
+      <button id="change-deadline" type="button">Simulate deadline change</button>
+      <span class="demo-clock">Fixed clock: Nov 5, 2026, 08:00 · America/Chicago</span>
+    </div>
+    <p id="demo-status" role="status" aria-live="polite">Loading fictional tasks…</p>
+  </header>
+  <main id="demo-stage"></main>
+</body>
+</html>

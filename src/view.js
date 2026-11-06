@@ -2,7 +2,7 @@ import { createTaskDetailView } from "./task-detail-view.js";
 import { ui } from "./ui.js";
 import { getLanguage, setLanguage, setLabel, setText, translate, intlLocale, localizeTree } from "./i18n.js";
 import { dateKey, monthWeeks, validDay, weekSegments, addDays } from "./dates.js";
-import { normalizeItems } from "./model.js";
+import { normalizeItems, snapshotImportWarnings } from "./model.js";
 import { styles } from "./styles.js";
 import { applyTheme, defaultTheme } from "./themes.js";
 import { createThemeSettings } from "./theme-settings-view.js";
@@ -69,6 +69,7 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
   let open = false;
   let opener = null;
   let month = initialMonth;
+  let lastNativeMonth = initialMonth;
   let snapshot = null;
   let store = null;
   let planningStore = null;
@@ -319,7 +320,7 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
           discardIdentity();
           error = `${error} Could not read local planning data: ${localCause.message}`;
         }
-      } else if (cause?.code === "AUTH" || !snapshot) {
+      } else if (cause?.code === "AUTH" || cause?.invalidateIdentity || !snapshot) {
         discardIdentity();
       }
       render();
@@ -779,7 +780,7 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
         body.append(status);
       }
       const items = normalizeItems(snapshot, userState);
-      for (const warning of snapshot.warnings || []) {
+      for (const warning of [...(snapshot.warnings || []), ...snapshotImportWarnings(snapshot)]) {
         const message = el("p", "notice", warning);
         message.setAttribute("role", "status");
         body.append(message);
@@ -830,13 +831,19 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
     renderedMonth = month;
     renderedDetailKey = selectedKey;
   }
+  function syncNativeMonth(nextMonth) {
+    if (!nextMonth) return;
+    // Reopening from the same Canvas month preserves navigation inside Planning.
+    if (nextMonth !== lastNativeMonth) month = nextMonth;
+    lastNativeMonth = nextMonth;
+  }
   async function show(nextMonth) {
     if (open) return;
     opener = document.activeElement;
     while (opener?.shadowRoot?.activeElement) opener = opener.shadowRoot.activeElement;
     if (nextMonth) {
       detailView.reset();
-      month = nextMonth;
+      syncNativeMonth(nextMonth);
       activeTab = "calendar";
       selectedKey = null;
       expandedWeeks.clear();
@@ -861,11 +868,12 @@ function mountPlanner({ host, loadSnapshot, loadInitialTheme, storeFactory, plan
     document.body.append(host);
     await load(true, { force: false });
   }
-  async function toggle() {
+  async function toggle(nextMonth) {
     if (open) {
       await close();
       return;
     }
+    syncNativeMonth(nextMonth);
     await show();
   }
   return { show, toggle, destroy: () => close(true) };

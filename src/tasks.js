@@ -56,6 +56,7 @@ export function taskGroup(item,group,{now=new Date(),timeZone}={}){
  if(group==='course')return item.contexts?.[0]||'Personal';
  if(group==='type')return item.type==='assignment'?'Homework':'Calendar activities';
  const today=dateKey(now,timeZone),day=dateKey(taskDate(item),timeZone)||item.endDay;
+ if(!validDay(day))return 'Date unavailable';
  if(day<today)return item.type==='assignment'?(item.completed?'Earlier deadlines':'Overdue'):'Earlier activities';
  if(day===today)return 'Today';if(day===addDays(today,1))return 'Tomorrow';
  if(day<=addDays(today,6))return 'Next 7 days';return 'Later';

@@ -399,3 +399,29 @@ test('new account local storage failure clears the previous account before insta
  await planner.show();id=88;host.shadowRoot.querySelector('[aria-label="Refresh calendar"]').click();await new Promise(resolve=>setTimeout(resolve,0));
  assert.equal(host.shadowRoot.querySelector('[data-item-key="event:5"]'),null);assert.match(host.shadowRoot.textContent,/Local storage unavailable/);planner.destroy();dom.window.close();
 });
+
+
+test('an undated event remains inspectable without creating a calendar bar or crashing planning views', async () => {
+  const {dom, host, planner, click} = setup(async () => ({
+    profile: fixture.profile, contexts: [], assignments: [],
+    events: [{id: 9, title: 'Unverified meeting', start_at: null, end_at: null}],
+    range: {startDate: '2026-03-01', endDate: '2027-03-31'}
+  }));
+  try {
+    await planner.show();
+    assert.match(host.shadowRoot.textContent, /Unverified meeting.*time/);
+    assert.equal(host.shadowRoot.querySelector('[data-item-key="event:9"]'), null);
+    await click('Task list view');
+    assert.ok(host.shadowRoot.querySelector('[data-task-row="event:9"]'));
+    await click('Open Unverified meeting');
+    assert.match(host.shadowRoot.querySelector('.detail').textContent, /Unverified meeting/);
+    await click('Close details');
+    await click('Planner view');
+    await click('New plan');
+    assert.ok(host.shadowRoot.querySelector('[data-pool-task="event:9"]'));
+    assert.equal(host.shadowRoot.querySelector('.fixed-block'), null);
+  } finally {
+    planner.destroy();
+    dom.window.close();
+  }
+});

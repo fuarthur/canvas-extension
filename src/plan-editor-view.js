@@ -1,5 +1,5 @@
 import {setText,setLabel,intlLocale} from './i18n.js';
-import {ui} from './ui.js';import {dateKey,zonedDateTime} from './dates.js';import {suggestSegment} from './plan-validation.js';import {updatePlan} from './plans.js';
+import {ui} from './ui.js';import {dateKey,zonedDateTime,validInstant} from './dates.js';import {suggestSegment} from './plan-validation.js';import {updatePlan} from './plans.js';
 export function renderPlanEditor({document,plan,itemKey,day,segmentId,startTime,editorValues,initialIssues,addedOnDrop,facts,resolvedTask,completionStatus,onComplete,onOpen,onApply,onClose}){
  const {el,input,field,button}=ui(document);const existing=plan.segments.find(s=>s.id===segmentId);const source=resolvedTask||facts.items?.find(item=>item.key===itemKey)||plan.tasks[itemKey];const task={...source,completed:Boolean(source.completed||facts.completed?.[itemKey])};const panel=el('section','arrange-editor');panel.setAttribute('role','dialog');setLabel(panel,task.type==='event'?'Event details':'Arrange task');panel.dataset.editorKey=JSON.stringify([itemKey,day,segmentId]);
  const header=el('div','plan-editor-header');header.append(el('h3','',task.title,true));
@@ -12,7 +12,7 @@ export function renderPlanEditor({document,plan,itemKey,day,segmentId,startTime,
  if(onComplete&&!task.canvasCompleted)panel.append(el('p','hint plan-completion-hint',task.completed?'This task is complete. Undo completion to continue working.':task.type==='event'?'Mark this activity as complete.':'Marks the entire task as complete, including all its work blocks.'));
  if(completionStatus?.error){const error=el('p','notice plan-completion-error',completionStatus.error);error.setAttribute('role','alert');panel.append(error);}
  if(task.type==='event'){
-  const format=instant=>new Intl.DateTimeFormat(intlLocale(document),{timeZone:plan.timeZone,month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(instant));
+  const format=instant=>validInstant(instant)?new Intl.DateTimeFormat(intlLocale(document),{timeZone:plan.timeZone,month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(instant)):'—';
   panel.append(el('p','hint',`${format(task.fixedStartAt)} – ${format(task.fixedEndAt)}`,true),el('p','hint','Fixed activity'));
   if(onOpen)panel.append(button(`Open ${task.title}`,()=>onOpen(itemKey),'text-button','View details'));
   panel.append(button('Cancel arranging task',onClose,'text-button','Close'));return panel;

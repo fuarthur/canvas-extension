@@ -120,7 +120,7 @@ const zh = {
   'Set selected planned finish':'设置所选任务的计划完成时间', 'Clear selected planned finish':'清除所选任务的计划完成时间', 'Set planned finish':'设置计划完成时间',
   'Save planned finish':'保存计划完成时间', 'Clear planned finish':'清除计划完成时间', 'Planned finish':'计划完成时间',
   'Planned finish is your personal target; it does not change the Canvas deadline or schedule work blocks.':'计划完成时间是你的个人目标；不会修改 Canvas 截止时间或自动安排工作分段。',
-  'Target is after the deadline':'计划完成时间晚于截止时间', 'Deadline':'截止时间', 'Activity starts':'活动开始时间', 'Historical task':'历史任务', 'Earlier activities':'过去的活动', 'Later':'以后',
+  'Target is after the deadline':'计划完成时间晚于截止时间', 'Deadline':'截止时间', 'Activity starts':'活动开始时间', 'Historical task':'历史任务', 'Date unavailable':'日期待确认', 'Earlier activities':'过去的活动', 'Later':'以后',
   'No tasks match your filters.':'没有符合筛选条件的任务。', 'Canvas completion is read-only.':'Canvas 完成状态只读。', 'Task changes saved.':'任务修改已保存。',
   'Undo task changes':'撤销任务修改', 'Undo':'撤销', 'Task changes undone.':'任务修改已撤销。', 'Undo finished; newer edits were kept.':'已撤销；后续的新修改已保留。',
   'Choose a valid planned finish date and time.':'请选择有效的计划完成日期和时刻。', 'Choose a valid date range.':'请选择有效的日期范围。',

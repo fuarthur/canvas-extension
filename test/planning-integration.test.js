@@ -52,3 +52,17 @@ test('failed settings save stays in place with the editable draft and error',asy
  await s.click('Save planning settings');assert.equal(root.querySelector('.content').scrollTop,720);assert.equal(root.querySelector('[data-control-id="Default estimate minutes"]').value,'45');
  assert.match(root.textContent,/Storage unavailable/);assert.doesNotMatch(root.textContent,/Planning settings saved/);assert.equal(root.querySelector('[data-control-id="Save planning settings"]').disabled,false);s.planner.destroy();s.dom.window.close();
 });
+
+test('invalid account metadata clears prior account tasks on refresh', async () => {
+ const dom=new JSDOM('<main/>',{url:'https://canvas.illinois.edu/calendar'}),host=dom.window.document.createElement('div');
+ const area=memoryStorage();let invalid=false;
+ const planner=mountPlanner({host,initialMonth:'2026-11',storeFactory:id=>createPlannerStore(area,'canvas.illinois.edu',id),loadSnapshot:async()=>{
+  if(invalid){const error=new Error('Invalid Canvas account time zone.');error.code='DATA';error.invalidateIdentity=true;throw error;}
+  return {profile:{id:77,time_zone:'America/Chicago'},contexts:[],assignments:[{id:'assignment_1',title:'Prior account private task',assignment:{due_at:'2026-11-08T17:00:00Z',unlock_at:null}}],events:[],range:{startDate:'2026-11-01',endDate:'2026-11-30'}};
+ }});
+ await planner.show();assert.match(host.shadowRoot.textContent,/Prior account private task/);
+ invalid=true;host.shadowRoot.querySelector('[data-control-id="Refresh calendar"]').click();await settle();
+ assert.doesNotMatch(host.shadowRoot.textContent,/Prior account private task/);
+ assert.match(host.shadowRoot.textContent,/Invalid Canvas account time zone/);
+ planner.destroy();dom.window.close();
+});

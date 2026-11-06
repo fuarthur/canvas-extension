@@ -2,6 +2,8 @@
 // Calendar/timeline geometry stays in styles.js; these rules define the shell,
 // controls and information hierarchy shared by every view.
 export const interfaceStyles = `
+  .generated-preview.is-partial { border-left:0;background:var(--cp-warning-bg);color:var(--cp-warning-text); }
+  .generated-preview.is-partial .hint,.generated-preview.is-partial .notice { color:var(--cp-warning-text)!important; }
   :host { --cp-radius:12px; --cp-space:8px; font-size:14px; line-height:1.5; }
   .shell { position:relative;border:0;border-radius:16px; }
   .header { min-height:64px;padding:12px 24px;gap:12px;flex-direction:row;align-items:center;border-bottom:0; }

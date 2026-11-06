@@ -42,6 +42,6 @@ if (location.pathname.startsWith('/calendar')) {
   });
   mountCalendarEntry({ document, onOpen: () => planner.show(monthFromCalendarHash(location.hash, new Date())) });
   chrome.runtime.onMessage.addListener(message => {
-    if (message?.type === 'PLANNER_TOGGLE') planner.toggle();
+    if (message?.type === 'PLANNER_TOGGLE') planner.toggle(monthFromCalendarHash(location.hash, new Date()));
   });
 }
