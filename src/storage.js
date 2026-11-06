@@ -2,7 +2,8 @@ import {validLanguage} from './i18n.js';
 import {defaultTheme,validTheme,normalizeTheme} from './themes.js';
 import {appearanceAccountKey,loadInitialAppearance,normalizeThemeScope,validThemeScope,saveThemeScope} from './appearance.js';
 import {defaultSettings,validateSettings,validateSchedule,validMinutes} from './planning-settings.js';
-import {validDay,dayCount} from './dates.js';
+import {validDay,dayCount,validInstant} from './dates.js';
+export {validInstant} from './dates.js';
 import {validTarget,defaultTaskPreferences,validateTaskPreferences} from './tasks.js';
 import {defaultReminderSettings,validateReminderSettings} from './reminder-settings.js';
 const taskQueues=new WeakMap();
@@ -130,7 +131,6 @@ export function createPlannerStore(storageArea, hostname, userId) {
 
 export const validPlanId=id=>typeof id==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(id);
 export const validItemKey=key=>typeof key==='string'&&/^(assignment|event):[A-Za-z0-9_-]+$/.test(key);
-export const validInstant=value=>typeof value==='string'&&Number.isFinite(Date.parse(value))&&/[TZ+-]/.test(value);
 export function isPlanRecord(p){
  if(!p||p.schemaVersion!==1||!validPlanId(p.id)||typeof p.name!=='string'||!p.name.trim()||p.name.length>120||!Number.isInteger(p.revision)||p.revision<0||!validInstant(p.createdAt)||!validInstant(p.updatedAt)||!validDay(p.range?.startDate)||!validDay(p.range?.endDate)||p.range.endDate<p.range.startDate||typeof p.timeZone!=='string'||validateSchedule(p.schedule).length||!p.tasks||typeof p.tasks!=='object'||Array.isArray(p.tasks)||!Array.isArray(p.segments))return false;
  if(dayCount(p.range.startDate,p.range.endDate)>180)return false;

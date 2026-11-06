@@ -27,6 +27,40 @@ test('a fixed event across the repeated DST hour retains its actual duration in 
   assert.equal(block.draggable,false);
  }finally{controller.destroy();s.dom.window.close();}
 });
+
+for(const render of [true,false])test(`removing the filtered Planner course restores available tasks and preserves other filters (render=${render})`,async()=>{
+ const other=task({key:'assignment:2',title:'Other Essay',contexts:['CS 374'],contextCodes:['course_374']});
+ const s=await setup([task(),other]);
+ try{
+  await s.click('New plan');
+  s.change('Search tasks','essay','input');s.change('Task sort','estimateDesc');s.change('Task arrangement','none');
+  s.change('Task course','course_456');
+  assert.deepEqual([...s.root.querySelectorAll('[data-pool-task]')].map(row=>row.dataset.poolTask),['assignment:1']);
+  s.controller.setData({items:[other]},{render});if(!render)s.controller.render();
+  assert.equal(s.root.querySelector('[data-control-id="Task course"]').value,'all');
+  assert.deepEqual([...s.root.querySelectorAll('[data-pool-task]')].map(row=>row.dataset.poolTask),['assignment:2']);
+  assert.equal(s.root.querySelector('[data-control-id="Search tasks"]').value,'essay');
+  assert.equal(s.root.querySelector('[data-control-id="Task sort"]').value,'estimateDesc');
+  assert.equal(s.root.querySelector('[data-control-id="Task arrangement"]').value,'none');
+  s.change('Task course','course_374');s.controller.setData({items:[other]});
+  assert.equal(s.root.querySelector('[data-control-id="Task course"]').value,'course_374');
+  assert.equal(s.root.querySelectorAll('[data-pool-task]').length,1);
+ }finally{s.controller.destroy();s.dom.window.close();}
+});
+
+test('recovering an unavailable Planner course starts at the first page of available tasks',async()=>{
+ const courseTasks=(course,offset)=>Array.from({length:20},(_,index)=>task({key:`assignment:${offset+index}`,title:`Essay ${String(index+1).padStart(2,'0')}`,contexts:[course],contextCodes:[course]}));
+ const removed=courseTasks('course_456',100),remaining=courseTasks('course_374',200),s=await setup([...removed,...remaining]);
+ try{
+  await s.click('New plan');s.change('Task course','course_456');await s.click('Next tasks page');
+  assert.match(s.root.querySelector('.task-pagination').textContent,/Page 2 \/ 2/);
+  s.controller.setData({items:remaining});
+  assert.equal(s.root.querySelector('[data-control-id="Task course"]').value,'all');
+  assert.match(s.root.querySelector('.task-pagination').textContent,/Page 1 \/ 2/);
+  assert.equal(s.root.querySelector('[data-pool-task]').dataset.poolTask,'assignment:200');
+ }finally{s.controller.destroy();s.dom.window.close();}
+});
+
 test('unsaved exit supports return and discard while failed saves preserve drafts',async()=>{
  const s=await setup();await s.click('New plan');const leaving=s.controller.requestLeave();assert.ok(s.root.querySelector('[role="alertdialog"]'));await s.click('Return to editing');assert.equal(await leaving,false);
  const next=s.controller.requestLeave();await s.click('Discard draft changes');assert.equal(await next,true);
@@ -96,6 +130,38 @@ test('a delayed deletion reply preserves edits to another selected plan',async()
   const plans=(await s.store.loadPlanningState()).plans;
   assert.deepEqual(Object.keys(plans),[s.kept.id]);assert.equal(plans[s.kept.id].name,'Keep my new edits');
  }finally{release?.();s.controller.destroy();s.dom.window.close();}
+});
+
+for(const render of [true,false])test(`a disappearing live event closes its editor without changing the saved plan (render=${render})`,async()=>{
+ const s=await setup([]);
+ try{
+  await s.click('New plan');await s.click('Save plan');
+  const saved=structuredClone((await s.store.loadPlanningState()).plans);
+  const event=task({key:'event:2',type:'event',title:'New study group',dueAt:null,startDay:'2026-10-01',endDay:'2026-10-01',fixedStartAt:'2026-10-01T15:00:00Z',fixedEndAt:'2026-10-01T16:00:00Z'});
+  s.controller.setData({items:[event]});await s.click('View event New study group');
+  assert.ok(s.root.querySelector('.arrange-editor'));
+  const updated={...event,title:'Updated study group'};
+  s.controller.setData({items:[updated]});
+  assert.match(s.root.querySelector('.arrange-editor').textContent,/Updated study group/);
+  assert.doesNotThrow(()=>{s.controller.setData({items:[]},{render});if(!render)s.controller.render();});
+  assert.equal(s.root.querySelector('.arrange-editor'),null);
+  assert.ok(s.root.querySelector('.task-pool'));assert.ok(s.root.querySelector('.week-scroll'));
+  assert.equal(s.root.querySelector('.plan-meta .draft-notice').textContent,'');
+  assert.deepEqual((await s.store.loadPlanningState()).plans,saved);
+  s.controller.setData({items:[event]});await s.click('View event New study group');
+  assert.ok(s.root.querySelector('.arrange-editor'));
+ }finally{s.controller.destroy();s.dom.window.close();}
+});
+
+test('an event retained in the plan snapshot stays viewable when its calendar is unloaded',async()=>{
+ const event=task({key:'event:2',type:'event',title:'Saved study group',dueAt:null,startDay:'2026-10-01',endDay:'2026-10-01',fixedStartAt:'2026-10-01T15:00:00Z',fixedEndAt:'2026-10-01T16:00:00Z'});
+ const s=await setup([event]);
+ try{
+  await s.click('New plan');await s.click('Save plan');await s.click('View event Saved study group');
+  assert.doesNotThrow(()=>s.controller.setData({items:[]}));
+  assert.match(s.root.querySelector('.arrange-editor').textContent,/Saved study group/);
+  assert.equal(s.root.querySelector('.plan-meta .draft-notice').textContent,'');
+ }finally{s.controller.destroy();s.dom.window.close();}
 });
 
 test('generated previews are separate from drafts until accepted and stale estimates prevent applying',async()=>{
@@ -319,4 +385,24 @@ test('drop coordinates account for timeline scrolling and snap to the nearest qu
 test('fully allocating the last task on the final page clamps pagination to remaining tasks',async()=>{
  const s=await setup(Array.from({length:21},(_,i)=>task({key:`assignment:${i}`,title:`Task ${String(i).padStart(2,'0')}`})));await s.click('New plan');await s.click('Next tasks page');await s.click('Next tasks page');await s.click('Arrange Task 20');await s.click('Add work block');
  assert.equal(s.root.querySelectorAll('.task-pool > [data-pool-task]').length,10);assert.ok(s.root.querySelector('.scheduled-task-pool [data-pool-task="assignment:20"]'));assert.equal(s.root.querySelector('[aria-label="Next tasks page"]').disabled,true);s.controller.destroy();s.dom.window.close();
+});
+
+
+test('an open event editor shows unavailable dates after its live timestamps disappear',async()=>{
+ const {normalizeItems}=await import('../src/model.js');
+ const raw={id:9,title:'Study group',start_at:'2026-10-01T15:00:00Z',end_at:'2026-10-01T16:00:00Z'};
+ const imported=event=>normalizeItems({profile:{id:77,time_zone:'America/Chicago'},contexts:[],assignments:[],events:[event]});
+ const s=await setup([]);
+ try{
+  await s.click('New plan');await s.click('Save plan');
+  const saved=structuredClone((await s.store.loadPlanningState()).plans);
+  s.controller.setData({items:imported(raw)});await s.click('View event Study group');
+  s.controller.setData({items:imported({...raw,start_at:null,end_at:null})});
+  const editor=s.root.querySelector('.arrange-editor');
+  assert.ok(editor);assert.match(editor.textContent,/— – —/);
+  assert.doesNotMatch(editor.textContent,/Dec 31|18:00/);
+  assert.deepEqual((await s.store.loadPlanningState()).plans,saved);
+  s.controller.setData({items:imported(raw)});
+  assert.match(s.root.querySelector('.arrange-editor').textContent,/Oct 1/);
+ }finally{s.controller.destroy();s.dom.window.close();}
 });

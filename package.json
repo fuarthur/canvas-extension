@@ -1,13 +1,19 @@
 {
   "name": "canvas-planning-calendar",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test",
-    "build": "node scripts/build.mjs"
+    "test": "node --test test/*.test.js",
+    "build": "node scripts/build.mjs",
+    "demo": "node scripts/preview.mjs --timeout=3600",
+    "test:e2e": "npm run build && playwright test",
+    "benchmark": "node scripts/benchmark.mjs",
+    "screenshots": "node scripts/capture-demo.mjs"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
+    "@playwright/test": "^1.64.1",
     "esbuild": "^0.25.0",
     "jsdom": "^26.0.0"
   }

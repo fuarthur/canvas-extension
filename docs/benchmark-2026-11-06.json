@@ -1,0 +1,50 @@
+{
+  "measuredAt": "2026-11-06T23:05:45.258Z",
+  "node": "v24.21.0",
+  "platform": "darwin/arm64",
+  "method": "Fixed synthetic 28-day fixtures; one warmup and three measured runs; 5s budget per run; correctness checked every run. Observations on this machine, not an optimality or production-scale guarantee.",
+  "results": [
+    {
+      "tasks": 20,
+      "days": 28,
+      "totalWorkMinutes": 600,
+      "status": "complete",
+      "blocks": 20,
+      "timesMs": [
+        7.12,
+        7.03,
+        6.84
+      ],
+      "medianMs": 7.03,
+      "visitedStates": 21
+    },
+    {
+      "tasks": 60,
+      "days": 28,
+      "totalWorkMinutes": 1800,
+      "status": "complete",
+      "blocks": 60,
+      "timesMs": [
+        29.4,
+        28.18,
+        28.04
+      ],
+      "medianMs": 28.18,
+      "visitedStates": 61
+    },
+    {
+      "tasks": 200,
+      "days": 28,
+      "totalWorkMinutes": 6000,
+      "status": "complete",
+      "blocks": 200,
+      "timesMs": [
+        222.8,
+        198.43,
+        182.93
+      ],
+      "medianMs": 198.43,
+      "visitedStates": 201
+    }
+  ]
+}

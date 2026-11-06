@@ -11,6 +11,15 @@ const json = (value, headers = {}) => new Response(JSON.stringify(value), {
   headers: { 'content-type': 'application/json', ...headers }
 });
 
+test('an invalid verified account timezone stops loading before calendar data is requested', async () => {
+  let calls = 0;
+  await assert.rejects(loadCanvasSnapshot({month: '2026-11', fetchImpl: async () => {
+    calls++;
+    return json({...fixture.profile, time_zone: 'Mars/Olympus'});
+  }}), error => error.code === 'DATA' && error.invalidateIdentity === true && /time zone/i.test(error.message));
+  assert.equal(calls, 1);
+});
+
 test('fetchPages follows Link pagination and gathers all rows', async () => {
   const calls = [];
   const fetchImpl = async url => {

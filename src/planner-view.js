@@ -256,12 +256,13 @@ function createPlannerController(options) {
     draw();
   }
   function renderPreview() {
-    const panel = el("section", "generated-preview");
+    const panel = el("section", `generated-preview${preview.validation?.complete ? '' : ' is-partial'}`);
     panel.append(el("h3", "", preview.validation?.complete ? "Generated plan preview" : "Partial plan preview"), el("p", "hint", `Peak ${formatMinutes(preview.metrics?.beforePeakMinutes || 0)} \u2192 ${formatMinutes(preview.metrics?.afterPeakMinutes || 0)}. Accepting changes the draft; Save keeps the archive.`));
     if (preview.status === "timeout") panel.append(el("p", preview.validation?.complete ? "hint" : "notice", preview.validation?.complete ? "Balancing reached its time limit. This schedule passed all checks; you can use it or retry to improve the balance." : "Calculation reached its time limit. You can retry; this is not a fully verified success."));
     for (const issue of preview.issues || []) {
       const line = el("p", "hint");
-      line.append(el("span", "", `${draft.tasks[issue.itemKey]?.title || ""}: `, true), el("span", "", issue.message));
+      if(draft.tasks[issue.itemKey]?.title)line.append(el("span", "", `${draft.tasks[issue.itemKey].title}: `, true));
+      line.append(el("span", "", issue.message));
       if (issue.missingMinutes) line.append(el("span", "", ` (${issue.missingMinutes} min missing)`));
       panel.append(line);
     }
@@ -362,7 +363,7 @@ function createPlannerController(options) {
       configurationSummary.dataset.controlId = "Expand plan settings";
       configuration.append(configurationSummary, field("Plan name", name));
       const planMeta = el("div", "plan-meta");
-      planMeta.append(el("span", "plan-range", `${draft.range.startDate} – ${draft.range.endDate}`, true), saveStatus);
+      planMeta.append(el("span", "plan-range", `${draft.range.startDate} – ${draft.range.endDate}`, true), el('span','hint',draft.timeZone,true), saveStatus);
       root.append(planMeta);
       const range = { ...draft.range };
       const schedule = structuredClone(draft.schedule);
@@ -446,7 +447,7 @@ function createPlannerController(options) {
       empty.append(el('h3','','Arrange your week'),el('p','','Create a plan, then generate a schedule or arrange tasks yourself.'),button('Create first plan',newPlan,'control primary','New plan'));
       root.append(empty);
     }
-    if (notice) root.append(el("p", conflict ? "notice" : "hint", notice));
+    if (notice) {const message=el("p", `planner-notice ${conflict ? "notice" : "hint"}`, notice);message.setAttribute('role','status');root.append(message);}
     if (conflict) root.append(button("Reload saved plan", async () => {
       if (options.onReloadPlans) {
         const fresh = await options.onReloadPlans();
@@ -553,6 +554,9 @@ function createPlannerController(options) {
     });
     const contexts = /* @__PURE__ */ new Map();
     for (const item of data.items) (item.contextCodes || []).forEach((code, index) => contexts.set(code, item.contexts[index] || code));
+    if(filters.course!=='all'&&!contexts.has(filters.course)){
+      filters.course='all';taskPage=0;scheduledPage=0;poolScroll=0;
+    }
     panel.append(search, select("Task course", [["all", "All courses / calendars"], ...[...contexts].map(([id, name]) => [id, name, true])], filters.course, (v) => {
       filters.course = v;
       taskPage=0;scheduledPage=0;
@@ -667,6 +671,7 @@ function createPlannerController(options) {
       } else draft = incoming[draft.id] ? structuredClone(incoming[draft.id]) : null;
     }
     archives = incoming;
+    if(editing&&!draft?.tasks[editing.itemKey]&&!data.items.some(item=>item.key===editing.itemKey))editing=null;
     if (render) draw();
   }, requestLeave, destroy() {
     generation++;

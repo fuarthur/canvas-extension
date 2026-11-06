@@ -53,3 +53,9 @@ test('task presets, sorts and groups use real deadlines, completion and targets'
  assert.equal(tasks.taskGroup({...current,completed:true},'date',options),'Earlier deadlines');
  assert.equal(tasks.targetInstant({day:'2026-03-08',time:'02:30'},zone),null);
 });
+
+
+test('events without a verified date are not grouped as past activities',()=>{
+ const event=task({key:'event:undated',type:'event',startDay:'',endDay:'',startAt:null,fixedStartAt:null});
+ assert.equal(tasks.taskGroup(event,'date',{now,timeZone:zone}),'Date unavailable');
+});

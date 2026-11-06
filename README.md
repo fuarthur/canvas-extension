@@ -1,119 +1,93 @@
 # Canvas Planning Calendar
 
-适用于 `canvas.illinois.edu/calendar` 的 Chrome 扩展。在 Canvas 的 Week / Month / Agenda 旁点击 **Planning / 规划**，即可打开当前月份的独立规划月视图；按 Escape 或点右上角关闭，即可回到原视图。工具栏扩展图标也可切换规划视图。扩展添加自己的入口和规划容器，可按设置在原生日历显示本地完成标记，不向 Canvas 提交更改。
+A Chrome extension that turns Canvas deadlines, estimated effort, and available study time into a concrete schedule. Students can review assignments, set working windows and daily capacity, generate work blocks, see conflicts and missing work, mark tasks complete, and regenerate the remaining plan.
 
-## 安装
+**Try it without a Canvas account.** The local demo uses the same interface, scheduler, validator, and persistence services with clearly labeled fictional data. No backend, API key, or AI service is required.
 
-需要 Node.js 18 或更新版本、Chrome，以及已登录的 Illinois Canvas 账号。
+![A saved study plan with simulated assignments and fixed events](docs/demo/planner-desktop.png)
+
+## Run the demo
+
+Prerequisites: Node.js **22.12+**, npm, and a current Chrome/Chromium browser.
 
 ```bash
 npm ci
+npm run demo
+```
+
+Open [the local demo](http://127.0.0.1:4173/). The server binds only to your computer and stops after one hour; Ctrl+C stops it sooner. To choose another port: `node scripts/preview.mjs --port=4175 --timeout=3600`.
+
+1. Open **Tasks**, select **Reading reflection**, change its estimated effort, and save.
+2. Open **Planner**. Click **Update plan task data** when an estimate has changed. Expand **Plan settings** to change working hours, capacity, dates, or rest days.
+3. Click **Generate**. Review the preview, **Accept generated plan**, then **Save**. Accept changes the draft; Save persists it.
+4. Complete a task in Tasks or its plan editor, then generate and save again. Refresh the browser to verify saved estimates, completion, and plans.
+5. Select **Too much work, too little time** to see each unassigned task and its missing minutes. **Simulate deadline change** demonstrates stale task data and a newly infeasible deadline. **Fail next save** demonstrates error recovery without discarding the draft.
+
+The demo clock stays at **November 5, 2026, 08:00 America/Chicago** so the walkthrough stays repeatable. Normal and constrained scenarios have separate browser-local storage; **Reset demo** restores only the selected fictional scenario. The standard sample contains seven assignments (one already completed), two fixed events, and a deliberately duplicated assignment source. Refresh does not duplicate tasks. A [two-minute demo script](docs/demo-guide.md) and [Chinese usage guide](docs/usage-zh.md) provide more detail.
+
+## Install the extension
+
+```bash
 npm run build
 ```
 
-在 Chrome 打开 `chrome://extensions`，启用“开发者模式”，选择“加载已解压的扩展程序”，并选中本项目的 `dist` 文件夹。打开 [Illinois Canvas 日历](https://canvas.illinois.edu/calendar)，点击视图切换栏中的 **Planning / 规划**。如果日历页在安装前已经打开，先刷新该页。修改源码后重新运行 `npm run build`，再到扩展页面点击刷新，并刷新日历页。
+Open `chrome://extensions`, enable Developer mode, select **Load unpacked**, and choose `dist/`. Sign into [Illinois Canvas](https://canvas.illinois.edu/calendar), reload the calendar, and select **Planning / 规划** next to the native calendar views. After source changes, rebuild, reload the extension, and refresh Canvas.
 
-## 使用
+The integration is currently scoped to `canvas.illinois.edu`. It reads the signed-in user's calendar through Canvas APIs; local completion, estimates, targets, and work blocks do **not** submit work to Canvas or modify its deadlines. The build also includes `demo.html` as an extension-local demo page.
 
-规划页面包含 Calendar（日历）、Tasks（任务）、Workload（工作量）、Planner（计划）、Settings（设置）五个标签。切换标签和估时指标使用已加载数据，不额外请求 Canvas。标签栏支持左右方向键、Home / End 移动焦点，Enter / Space 打开对应页面。
+## What is implemented
 
-设置采用分组列表：外观直接显示，高级配置默认折叠，标题旁保留当前值；长说明收进“使用说明”。底部固定显示保存入口和未保存状态。输入错误会展开相关设置，即使切换了加载模式或关闭提醒，也能修正原来的无效值。视觉与交互参考 Telegram UI、Radix 和 shadcn/ui，沿用原生控件与现有主题，不增加运行时依赖；选型依据见 [UI 设计库调研](docs/research/2026-10-12-ui-libraries.md)。
+- Canvas assignment/event loading with pagination, selected calendars, bounded date ranges, account-scoped caching, and explicit authentication/access errors.
+- A searchable task agenda; local completion and undo; manual/rule/default effort estimates; personal finish targets; English and Chinese controls.
+- Per-weekday working windows, daily capacities, date overrides/rest days, fixed calendar events, and configurable breaks.
+- Automatic planning with a preview, per-task unassigned minutes/reasons, deadline/conflict checks, manual keyboard-accessible arrangement, drag-and-drop, and locked blocks.
+- Saved plan revisions, stale-data detection, completion-aware regeneration, and reload persistence. Deadline reminders and themes remain existing optional features; they are outside the core demo.
 
-界面优先显示日常任务和每日安排：任务清单常驻搜索与课程筛选，其余选项位于“更多筛选”，已启用的高级筛选会显示在外侧并可单独移除。每行右侧可直接完成或重新打开任务，保存成功后提供撤销；Canvas 已完成项保持只读。勾选任务后出现批量操作栏，点击调整耗时或计划完成时间才展开对应表单。任务详情中的开始日期、个人完成目标和连续完成要求位于“规划选项”；未保存的完成目标在修改估时、完成状态或本地数据刷新时继续保留。
+## Architecture
 
-计划页优先显示任务池与每日安排；工作量曲线位于下方默认折叠的“工作量概览”。复制和删除位于“更多操作”，生成预览可切换当前/生成后的曲线。日期、容量、估时规则及新计划默认值按需展开。顶部月份导航仅出现在日历和工作量页；同一页面的数据更新保留滚动位置。
+| Boundary | Main modules | Responsibility |
+| --- | --- | --- |
+| Extension integration | `content.js`, `background.js`, `canvas-api.js` | Mount the view, read Canvas, coordinate background requests |
+| Task domain | `model.js`, `tasks.js`, `estimates.js`, `dates.js` | Stable identities, deduplication, completion/effort, local dates and real instants |
+| Planning domain | `plans.js`, `availability.js`, `plan-validation.js`, `scheduler.js` | Plan snapshots, legal intervals, constraint checks, bounded scheduling |
+| Persistence | `storage.js`, `plan-service.js` | Account isolation, validated records, serialized task edits, revision-checked plan writes |
+| Interface | `view.js`, `tasks-view.js`, `planner-view.js`, `planner-week-view.js` | Native DOM controls inside a Shadow DOM, task/editor/week views |
+| Demo adapters | `demo/data.js`, `demo/storage.js`, `demo/demo.js` | Fixed fictional inputs and isolated local storage around the production core |
 
-在 **Settings → Language / 语言** 中选择 **English** 或 **简体中文**，界面会立即切换，并按当前 Canvas 账号记住选择；首次使用默认英文。编辑计划时可进入 Settings 切换语言，再返回 Planner 继续编辑。切换语言不会提交尚未保存的规则、丢失计划草稿或改写 Canvas 的任务标题、课程名称和用户输入内容。
+Source files live under `src/`. The extension has no runtime framework or hosted service; esbuild bundles ES modules for Manifest V3. Playwright and axe are development dependencies. See the [code tour and interview questions](docs/code-tour.md).
 
-在 **Settings → Deadline reminders / 设置 → 截止提醒** 中可开启桌面提醒，默认关闭，预设 **1 轮、提前 2 小时**。可配置 1–5 轮，每轮独立选择分钟、小时或天，范围为提前 1 分钟至 30 天，换算后必须是整数分钟；例如 0.5 小时会保存为 30 分钟。点击 **Save changes / 保存更改** 生效，提前时间自动排序，重复时间合并后显示实际轮数。只提醒当前已验证账号、所选日历中尚未提交或完成的 Canvas 作业，采用真实截止时间；个人完成目标、日历活动和计划工作段不参与。
+## Scheduling method and tradeoffs
 
-请保持浏览器运行，Canvas 标签页可以关闭。启用后后台每 15 分钟更新截止信息，通知显示原始作业名、课程名、剩余时间和账号时区下的截止时刻；点击打开对应 Canvas 作业。浏览器退出、休眠或系统通知设置可能延迟提醒，恢复后只补发尚未截止作业最近错过的一轮。已发送轮次会保存在本设备，重启、修改设置或撤销完成不会重复已发送的同一轮。离线时只使用 24 小时以内的同步数据，超过后暂停；登录失效立即暂停，重新验证登录成功后恢复。关闭提醒保留配置及发送记录。
+The planner enforces releases, true deadlines, manual start days, the plan horizon, fixed events, working windows, daily capacity, completion, and retained locks. Default estimates are 60 minutes. Tasks remain continuous unless the user explicitly permits splitting **and** the estimate exceeds the configured threshold (60 minutes by default). Personal finish targets are displayed separately; they are not scheduling deadlines.
 
-提醒区域显示运行状态和上次同步时间，**Send test reminder / 发送测试提醒** 在开关关闭时也可使用，测试只发送合成文本。需要浏览器及系统允许 Chrome 通知。本次构建新增 `alarms` 和 `notifications` 权限，Canvas 主机范围保持不变；请在扩展管理页手动重载本项目的 `dist`，再刷新 Canvas 日历页。真实通知、后台登录及重启验证仍需在重载后完成，自动化与界面模拟的证据见 [截止提醒验收记录](docs/superpowers/reviews/2026-10-04-deadline-reminders.md)。
+It first tries continuous placement with bounded backtracking and deadline-oriented ordering. If that fails, permitted tasks can be split: zero-break plans use a day/interval/task maximum-flow subproblem; plans with breaks use greedy placement that reserves the actual gaps. A local improvement phase moves whole unlocked blocks to reduce daily peak load, then capacity-weighted imbalance and deadline proximity. Generated results are checked by a separate validation module before acceptance.
 
+**This is a bounded heuristic, not a global optimizer.** Continuous candidates use interval boundaries; each search pass is capped at 2,000 states, and the extension uses a cooperative five-second calculation budget. Search exhaustion and timeouts are disclosed. A partial result does not prove no complete schedule exists. Every missing task remains in `validation.unassigned`, with missing minutes and an explanation in the preview. Invalid facts or conflicting locks must be resolved before a new calculation. See [the algorithm notes](docs/scheduling.md) for precise constraints and limitations.
 
-在 **Settings → Appearance / 设置 → 外观** 中可选择默认浅色、Dark mode（深色模式）、森林绿、暖色或跟随系统；跟随系统会在系统外观变化时自动切换。选择 Custom colors（自定义配色）后，可使用颜色选择器或六位十六进制值设置主色、背景色、卡片色和文字色，并选择浅色/深色底板。切换底板或点击“恢复默认配色”会重置自定义颜色；切换到预设主题会保留自定义配色，方便以后切回。文字对比不足时会提示调整。外观修改自动按 Canvas 账号保存，覆盖规划日历、任务清单、工作量与对比图表、计划和详情，保留未保存的规则与计划草稿。打开规划视图前先恢复本地主题，加载画面沿用配色；Canvas 确认账号后再使用该账号的独立设置。
+Times are stored as ISO instants with an offset and interpreted in the Canvas account's IANA zone. Missing DST clock times are rejected; repeated local times use the earlier start and later availability-window end. Work minutes count elapsed time, including 23/25-hour days. The browser tests run with an Asia/Shanghai browser zone against an America/Chicago account.
 
-外观中另设 **主题应用范围**：默认“仅规划 Tab”；选择“整个 Canvas”后，当前主题也用于原生 Calendar、Dashboard、课程列表、作业和成绩等页面，关闭规划面板后仍生效。范围可随时撤销，独立于规划规则保存。课程色块、事件分类色（边框/图标）、提交状态、图片、图表和嵌入工具保持原色；深色模式的事件使用深色背景及清晰文字；教学富文本保留浅色阅读区域。正常新开页和刷新在内容显示前恢复已保存外观；缓存不可用时最多等待 250 毫秒，随后释放页面，不会因存储异常一直隐藏 Canvas。登录、独立文件预览及子框架不应用全局主题。首次升级后需在扩展管理页重新加载扩展，再刷新已打开的 Canvas 页面。浏览器覆盖和首帧验证边界见 [全局主题验收](docs/superpowers/reviews/2026-09-30-canvas-global-theme.md)。
+## Verification
 
-- 活动按 Canvas 的真实开始和结束日期显示为跨日色条。
-- 作业默认从 Canvas 开放日期显示到截止日期。没有开放日期时，先显示在截止日；点击作业色条，在详情里设置“Plan start date”即可形成规划区间。用户设置的开始日优先于 Canvas 开放日期，点“Use Canvas date”可清除本地设置。
-- Canvas 中当前用户已完成的作业会自动显示为完成，详情标注“Completed in Canvas”；该状态只读。其他项目可在详情里勾选或取消“Complete in this extension”，本地标记不会改变 Canvas 的提交或 Planner 状态。
-- **Settings → Canvas calendar completion / 设置 → Canvas 日历完成标记** 中可开启「在 Canvas 日历显示插件完成标记」，点击「Save changes / 保存更改」生效；默认关闭，按 Canvas 账号保存。开启后，在插件中完成的作业或活动会在原生 Month、Week 和 Agenda 视图显示紫色虚线删除线与 **✓ P** 徽标，悬停提示「在插件中完成」。即使该标签页从未打开规划面板也会生效；其他标签页完成、取消完成、批量修改或撤销时自动同步，切换月份与视图后恢复标记。Canvas 原生已完成项目保留其原标识；关闭开关仅移除插件标识，已保存的完成状态继续保留。
-- Planning 日历快照在扩展本地存储中保留 24 小时，刷新页面和新标签页也能共享。再次打开先确认当前 Canvas 账号，5 分钟内复用活动、作业及详情；超过 5 分钟先显示缓存，再后台更新。24 小时以上的缓存不再使用。点击 Refresh、重新选择日历、修改加载范围或 Retry calendar access 会立即重新加载。缓存按账号、日历选择、加载设置及学期隔离，本地完成标记、估时及计划始终从本地存储读取最新值；缓存保存失败不阻止在线加载。
-- “Settings”标签可选择要加载的日历，点击“Save and load”保存并立即生效。未选择的日历以后不会请求其活动或作业。首次使用默认沿用原生日历当前勾选的范围；保存后使用扩展自己的选择，各账号独立。
-- 上月、下月、今天、刷新按钮位于顶部；项目过多的周可点“more”展开。点击详情中的链接可打开原始 Canvas 项目。
+```bash
+npm test                         # Node domain, service, and DOM integration tests
+npx playwright install chromium  # one-time browser installation
+npm run test:e2e                  # builds, then runs real Chromium browser tests
+npm run benchmark                # fixed data; correctness checked on every run
+npm run screenshots              # creates four fictional screenshots locally
+```
 
-## 任务清单与批量操作
+Current verification includes **448 Node tests** and **8 browser scenarios** covering the complete demo, insufficient time, save/retry/reload, changed deadlines, keyboard/narrow-screen accessibility, no external demo requests, and an installed Manifest V3 extension with **simulated Canvas API responses**. Exact final counts, commands, environment, and remaining gaps are in the [verification record](docs/verification-2026-11-06.md). The GitHub Actions workflow runs the Node suite, browser scenarios, and benchmark on Linux / Node 22; see [Actions](https://github.com/fuarthur/canvas-extension/actions) for the status of each commit.
 
-**Tasks / 任务** 是独立的增强 Agenda，不局限于当前月格。All tasks 默认展示未完成项，可切换 All statuses 查看完成项；快捷入口还包括 Overdue H/W、Today、Next 7 days（今天起七天）和 Completed。顶部逾期入口直接打开逾期作业，清除与此范围冲突的搜索和筛选。普通活动结束后不计入 overdue homework。
+The [recorded benchmark](docs/benchmark-2026-11-05.json) uses fixed 28-day fixtures with 20/60/200 tasks, one warmup and three measured runs. Each run checks deadlines, release times, total effort, capacity, and breaks. Timings are local observations, not a performance improvement claim or a guarantee for arbitrary inputs.
 
-支持按标题搜索、按课程/日历、任务类型和完成状态筛选，按截止/活动开始时间、预计耗时、个人计划完成时间和标题升降序排列，以及按日期、课程或类型分组。筛选、排序、分组和历史显示偏好按 Canvas 账号保存。清单明确显示已加载日期范围，可展开范围面板扩大加载；只包括所选日历和范围内有日期的项目，仍不包含无截止日期的作业。加载范围最多 732 天。
+## Known limits and verification boundaries
 
-勾选单行或全选当前筛选结果后，操作栏显示所选数量与总预计耗时。可批量标记本地完成、取消本地完成、设置 1–1440 的整数分钟估时或恢复规则/default，并设置/清除个人计划完成日期和可选时刻。修改筛选条件会清空选择；保存失败保留选择供重试。Canvas 已完成项的状态只读，批量完成操作会跳过这些项；仍可调整它们的本地估时和目标。
+- **Live authenticated Canvas, actual course permissions, system notifications, and sleep/restart behavior were not verified in this task.** Automated extension integration uses fully simulated responses; it does not establish live API compatibility.
+- The calendar API only provides dated items from selected calendars and the loaded range. Undated assignments may not be returned at all. Malformed/undated records that are returned get visible import warnings; conflicting duplicate dates block scheduling until refreshed.
+- One working window per day; no overnight window, task dependencies, recurring local events, or partial-progress tracking. Completing a task marks the whole task complete. Completed and locked blocks are retained during regeneration.
+- Regeneration replaces unfinished unlocked work. Deleted or unloaded tasks remain unverifiable in saved plans and block automatic generation until reviewed; estimates/date changes require explicit task-data updates.
+- Estimates are user/rule inputs. No learned estimates, measured learning benefit, global-optimality claim, user-count claim, or large-scale production claim is made.
+- Planning stores data on this device, with no cloud sync. The demo uses origin-local storage and Web Locks for cross-tab mutation serialization; runtimes without Web Locks only serialize within the current page.
+- Automated accessibility checks cover sampled Calendar/Planner states and keyboard tab navigation, not a full screen-reader or physical-device certification. The week grid can scroll horizontally on narrow screens; **Arrange** provides a keyboard alternative.
 
-**计划完成时间与预计耗时是两个独立字段。** 日期不填时刻表示当天的完成目标，排序和截止提示按 Canvas 时区当天 23:59 判断；明确填写时刻则按该时刻判断。夏令时跳过的当地时刻无法保存，重复时刻使用较早的一次。目标晚于 Canvas 截止时明确提示；个人目标不会修改 Canvas 截止或自动安排工作分段。任务详情也可单独设置目标。
-
-每次成功批量修改后可撤销最近一次操作。撤销只恢复此批操作触及的字段，遇到后续的新编辑会跳过；不同页面的单项修改、批量操作与撤销按账号串行写入，并通过每个字段的写入标识识别新修改。撤销入口保留到关闭规划视图，关闭后已保存修改仍保留。
-
-## 历史作业过滤
-
-Settings → Historical homework 默认按当前学期隐藏旧作业：1–5 月从当年 1 月 1 日起算，6–7 月从 6 月 1 日起算，8–12 月从 8 月 1 日起算。仅隐藏截止时刻已经过去且截止日期早于该起点的作业，按 Canvas 用户时区判断；本学期的逾期作业、未来作业和普通日历活动继续显示。
-
-也可选择 Older than X months，默认 4 个月，允许 1–24 的整数月数；按日历月向前推算，月末会截到目标月的最后一天。选择 Show all history 可关闭过滤。清单显示已加载范围内的历史项数量和实际截止界线，点 View history 可临时查看、编辑历史项；数据、完成标记和估时都保留。
-
-同一规则用于日历、压力统计、Workload、逾期数量和新计划候选任务。已有计划保留历史任务及安排并显示历史标识，不会因为过滤设置变化自动删除或改写存档；过去的截止仍按真实时间检查。更改全局任务估时后，已有计划继续通过 Update plan task data 显式更新估时。
-
-## 压力与预计时长
-
-Calendar 的日期旁显示当日剩余未完成项目数：默认 0–2 为绿色、3–5 为黄色、6 及以上为红色，阈值可在 Settings 修改。点击徽标查看当日项目；顶部另列出今日剩余和逾期数量。
-
-Workload 按作业截止日计数，固定活动按开始日计数，每个项目只计一次；已完成项目不计入。曲线可切换任务数和预计小时数，显示本月总量、逾期数和峰值日期；点曲线日期可查看任务，也可展开数据表。
-
-任务详情可以填写预计分钟数，或清除手动覆盖。优先级为：**手动估时 → 第一条匹配的已启用规则 → 默认估时**。默认 60 分钟，可在 Settings 修改。规则支持不区分大小写的标题包含关键词，以及指定课程/日历；规则顺序可调整，保存前可预览匹配结果。还可选择任务是否必须一次连续完成。
-
-## Planner 与计划存档
-
-新建计划默认覆盖从今天开始的 28 天，可改为最多 180 天。左栏独立滚动，每页 10 项，可搜索全部标题、筛选课程和安排状态，按截止或预计时长升降序排列、按课程分组；已安排分类也支持分页。右栏以周视图横向显示周日至周六、纵向显示 00:00–24:00，可切换上一周、下一周或回到今天，默认滚到 09:00。拖入任务时按 15 分钟吸附到具体日期和时段，按剩余估时创建工作段；拖动已有工作段保持完整时长，锁定或已完成的工作段不能拖动。固定事件按原始时间显示。所有落点检查开放时间、截止时间、工作窗口、日容量和重叠；失败时显示原因，原工作段保持不变。点击工作段在时间表上方编辑，也可通过“⋯”打开详情、移除、锁定或完成；仍支持 Arrange 手动填写时间。按日曲线反映计划安排，区别于 Workload 的原始截止分布。
-
-点击右侧工作段或固定活动后，面板标题右侧提供 **Mark as complete / 标记为完成**，完成后变为 **Undo completion / 撤销完成**。标记立即保存，无需再保存计划；同一任务的所有时间块同步显示 ✓、淡色和标题删除线，原时间与安排保留，左侧未完成清单及剩余工作量同步更新。保存中禁用按钮，失败时保留原状态并显示重试提示。Canvas 已完成作业显示只读状态；工作段的“⋯”菜单也支持完成和撤销完成。
-
-**编辑的是草稿，Save 才写入存档。** 可重命名、复制、删除和重开多份计划，选择 2–4 份存档对比共同日期轴上的任务数/小时数，以及保存时安排/当前剩余工作。完成标记会更新各计划的剩余曲线，历史安排仍保留。离开未保存草稿时可选择保存、丢弃修改或继续编辑；写入失败、跨页面保存冲突会保留草稿并提供恢复操作。
-
-自动排程默认在相邻工作段之间预留 **15 分钟缓冲**，用于休息或处理未完成工作，包括锁定工作段前后和拆分后的分段。可在 Settings → 新计划的默认设置，或单个计划的「计划日期、休息日与每日容量」中修改「任务间缓冲时间（分钟）」，允许 0–1440 的整数分钟，设为 0 可关闭。缓冲占用实际可用时段，但不增加任务估时或每日工作容量统计；时间不足时显示未安排的工作，并提示缩短缓冲或扩大工作时段。旧计划重新生成时也默认使用 15 分钟；已保存安排须重新生成并接受结果才会加入空隙。手动编辑保留原有安排方式。
-
-每份计划有独立的工作窗口、每日容量和日期例外。容量设为 0 是休息日，较小值是轻工作日；全局设置只作为新计划默认。固定活动按真实时钟占用可用窗口和容量，活动的预计时长只用于曲线统计，不会缩短真实占用。
-
-Generate balanced plan 先加载完整计划范围，再安排未完成任务，尊重当前 Canvas 开放时间、真实截止时刻、手动开始日、固定活动、工作窗口、容量、锁定分段和连续完成要求。任务默认必须一次连续完成；任务详情中的“允许拆分”默认不勾选，只有明确勾选且总估时超过“不拆分时长阈值”才可拆分。阈值默认 60 分钟，含等于：60 分钟及以下即使允许拆分也须保持完整。设置中的“新计划默认设置”可修改默认阈值，现有计划可在“计划日期、休息日与每日容量”中单独修改。排程先用有限回溯尝试全部任务连续完成，找不到完整连续方案时才对符合条件的任务使用容量分配。均衡阶段只移动完整工作段，先合并相邻的同任务时段，不为降低每日峰值或平均差异切碎任务。没有完整时段的连续任务显示未安排原因，手动安排同样执行此规则。旧计划保留供查看，旧版默认可拆分不代表用户授权；重新生成遵循新规则，已锁定的旧碎片须先解锁或调整。左侧任务池默认优先展示未安排和部分安排任务；已累计安排全部估时的任务移入底部默认收起的“已安排”分类。右侧删除分段使累计时间不足后，任务自动回到前面的列表；搜索、课程筛选和分组同样适用于两类任务，主动筛选“已安排”时直接展示这些任务。结果先预览，Accept 只更新草稿，Save 才保存。可随时取消；计算超时或容量不足会显示部分结果和缺口，不会宣称全部截止已保证。
-
-24 小时内到期任务显示红色紧急提示，72 小时内显示黄色；任务最后一个工作段结束离截止不足 24 小时也会提示缓冲过少，并显示具体剩余时间；悬停或键盘聚焦可读到解释。这是预留余量提醒，不是逾期或截止冲突，因此可与“截止检查通过”同时出现。逾期任务继续显示，但无法补救已经错过的截止。计划范围之外的未来任务明确标出，不计入这份计划的完成承诺。
-
-扩展通过当前登录会话**只读**地获取个人、活跃课程、小组和可见账号日历的数据。计划开始日、本地完成状态、日历选择、估时规则、个人计划完成目标、历史过滤、清单偏好和计划存档保存在 Chrome 的 `chrome.storage.local`，按 Canvas 用户账号隔离；扩展不把日历内容发送到第三方服务。当前页面关闭并重开规划视图时会保留浏览月份，刷新页面后则重新按 Canvas 日历 URL 定位。日期按 Canvas 用户时区展示，若 Canvas 未提供时区则使用浏览器时区。
-
-截止提醒的配置、同步快照、发送记录和点击映射同样只保存在本设备并按账号隔离。启用提醒后，浏览器后台会继续通过现有登录会话读取 Canvas；提醒关闭时不执行周期读取。
-
-Settings → Calendar loading range / 日历加载范围提供两种模式：默认“前后月份”为查看月份之前 4 个月、之后 4 个月，含当前月共 9 个月；前后月数可分别设为 0–12，含当前月最多 24 个月。“当前学期”按查看月份自动选择 Spring（1–5 月）或 Fall（8–12 月）。Summer / Winter 为额外支持项，默认关闭；启用后可配置包含起止月份的范围，结束月早于开始月时自动跨年。Summer 默认 6–7 月，Winter 默认 12–1 月；额外学期前后各补 1 个月，因此默认实际加载 5–8 月、11 月至次年 2 月。落在额外学期的配置月份内时优先使用其范围；两个额外学期重叠时优先 Winter。6–7 月未启用 Summer 时只加载正在查看的月份。设置会预览实际加载日期，保存后立即生效。
-
-UIUC 官方 Summer 有多个课程区间，2027 年整体覆盖 5 月 17 日至 8 月 7 日；Winter 2026–27 为 12 月 18 日至 1 月 15 日。扩展采用上述可调整的完整月份范围，而不是每年硬编码教学日期，前后缓冲用于覆盖交界事件。参见 [Summer 官方校历](https://registrar.illinois.edu/summer-2027-academic-calendar/) 和 [Winter 官方校历](https://registrar.illinois.edu/faculty-staff/calendars/academic-calendars/wi26-27-academic-calendar/)。
-
-没有可用缓存时，先读取当前月视图（含所选范围内相邻月份的日历格子），显示后再后台补齐配置范围。首次加载使用柔和骨架动画，后台更新保留日历、详情与滚动位置，并显示旋转提示；系统开启“减少动态效果”时关闭动画。计划生成和手动扩大任务范围仍等待所需日期完整加载。日历目录和无权限结果在当前页面内缓存五分钟，请求最多六个并发；若权限发生变化，可在 Settings 点击“Retry calendar access”立即重新检查。
-
-## 验证与限制
-
-### 本轮改进体验（quality pass 1）
-
-本轮修复任务估时输入在刷新/保存失败时丢失、已取消加载课程导致任务清单假空、删除计划后旧工作段编辑器导致页面异常，并补齐规划弹窗的键盘焦点进入、Tab 循环及关闭后返回。范围、验收和检查结果见 [改进日志](docs/improvement-log.md)。
-
-无需登录即可体验虚构数据：在项目目录运行 `node scripts/preview.mjs --timeout=3600`，打开 `http://127.0.0.1:4173/`。预览仅绑定本机，最长一小时后自动停止；按 Ctrl+C 可提前结束。顶部可切换 390px 窄屏、重置数据，或让下一次本地保存失败一次，以检查错误恢复。所有演示修改仅存在内存，刷新即重置，不读取真实扩展数据，也不向 Canvas 发请求。预览不替代加载 `dist` 后的真实扩展集成验证。
-
-运行 `npm test` 执行 API 分页、跨周日期、时区、账号隔离和界面交互测试；运行 `npm run build` 生成可加载的 Manifest V3 扩展。
-
-Illinois Canvas 的日历需要校园登录。自动化测试覆盖 API 结构、筛选、缓存、当前用户完成状态及界面交互，并已在已登录的 Chrome 日历页验证配置保存、月份切换和 Canvas 完成状态。未登录或 API 请求失败时，规划视图提供错误提示与重试，原生 Canvas 日历仍可直接使用。
-
-若 Canvas 拒绝批次中的某个日历，扩展会拆分请求，继续加载可访问的内容，并列出未能加载的日历名称。若所有所选日历均被拒绝，则显示错误，仍可进入 Settings 更换选择；主动取消全部选择则显示空视图。账号日历接口同时兼容数组和 Illinois 使用的 `account_calendars` 包装格式。
-
-当前版本只支持 Illinois Canvas，不显示无截止日的项目，也不跨设备同步本地数据。排程并不保证全局最优；连续优先搜索与允许拆分的后备搜索各最多探索 2000 个状态、均衡最多 2000 次改善、单次计算默认限时 5 秒。没有找到完整结果不表示数学上无解，可能需要调整容量、范围或连续完成要求。未知/未加载任务、过期快照和无法满足的约束会阻止完整成功状态；任务数据变化后可明确更新计划快照。
-
-自动测试覆盖跨标签页持久缓存、24 小时缓存保留、可配置加载月份与学期、Summer/Winter 跨年及边界缓冲、当月优先加载、退出登录后的并发缓存失效、生成计划性能、均衡优化超时提示、逾期任务与单次安排、时区缓存隔离、拖放即时安排与原位编辑、旧计划日期边界、设置保存后的滚动位置与提示、缓存复用与过期后台更新、缓存范围扩展、手动刷新、跨账号失败隔离、请求并发与结果顺序保护、任务筛选与多选、批量修改与撤销、跨页面修改保护、历史日期边界、估时规则、存档并发、计划编辑、容量、开放/截止、夏令时、后台取消、跨账号恢复、图表交互与中英文切换、语言持久化、主题切换与自定义配色、系统深色模式、跨页面配色更新、账号隔离及未保存编辑保留。已登录 Chrome 的真实页面验证记录见 [任务清单验证](docs/superpowers/reviews/2026-09-30-tasks-and-history.md) 与 [工作量及计划验证](docs/superpowers/reviews/2026-09-30-workload-and-planner.md)。
-
-UI 简化与交互稳定性验证见 [UI/UX 重构验收](docs/superpowers/reviews/2026-10-12-ui-ux-refresh.md)；此前记录见 [UI 验证记录](docs/superpowers/reviews/2026-09-30-ui-simplification.md)。
+[Project walkthrough](docs/demo-guide.md) · [Code tour / interview prep / resume drafts](docs/code-tour.md) · [Detailed Chinese guide](docs/usage-zh.md) · [Work log](docs/portfolio-progress.md)

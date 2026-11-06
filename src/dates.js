@@ -12,6 +12,14 @@ export function validDay(value) {
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
+// Persist real instants only. A local ISO time has a different meaning on each
+// machine, and Date.parse alone silently normalizes dates such as February 30.
+export function validInstant(value) {
+  return typeof value === 'string' && validDay(value.slice(0, 10)) &&
+    /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) &&
+    Number.isFinite(Date.parse(value));
+}
+
 function utcDay(value) {
   return new Date(`${value}T00:00:00Z`);
 }

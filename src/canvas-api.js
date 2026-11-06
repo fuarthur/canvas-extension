@@ -32,6 +32,23 @@ export class CanvasApiError extends Error {
   }
 }
 
+function validateProfile(profile) {
+  let message;
+  if (!profile || !/^\d+$/.test(String(profile.id))) message = 'Canvas did not identify the signed-in user.';
+  else {
+    try {
+      if (typeof profile.time_zone !== 'string' || !profile.time_zone) throw new Error();
+      new Intl.DateTimeFormat('en', {timeZone: profile.time_zone});
+    } catch { message = 'Invalid Canvas account time zone. Check your Canvas profile and reload.'; }
+  }
+  if (message) {
+    const error = new CanvasApiError('DATA', message);
+    error.invalidateIdentity = true;
+    throw error;
+  }
+  return profile;
+}
+
 function safeUrl(value) {
   const url = new URL(value, ORIGIN);
   if (url.origin !== ORIGIN) throw new CanvasApiError('DATA', 'Canvas returned a link outside its site.');
@@ -66,8 +83,7 @@ async function getJson(fetchImpl, url) {
 
 export async function fetchCanvasProfile(fetchImpl=fetch){
  const profile=(await getJson(fetchImpl,`${ORIGIN}/api/v1/users/self/profile`)).body;
- if(!profile||!/^\d+$/.test(String(profile.id)))throw new CanvasApiError('DATA','Canvas did not identify the signed-in user.');
- return profile;
+ return validateProfile(profile);
 }
 
 export async function loadCanvasReminderSnapshot({fetchImpl=fetch,profile,selectedCalendars,now=Date.now,maxLeadMinutes,cache=new Map()}){
@@ -147,9 +163,7 @@ export async function loadCanvasSnapshot({ fetchImpl = fetch, month, readSelecti
   let profile;
   try { profile = (await getJson(fetchImpl, `${ORIGIN}/api/v1/users/self/profile`)).body; }
   catch(error) { if(error.code==='AUTH'){snapshots.clear();cache.clear();pending.clear();generations.clear();await persistentCache?.clear().catch(()=>{});} throw error; }
-  if (!profile || !Number.isFinite(Number(profile.id))) {
-    throw new CanvasApiError('DATA', 'Canvas did not identify the signed-in user.');
-  }
+  validateProfile(profile);
   const userId = String(profile.id);
   let savedSelection,loadingSettings;
   try { [savedSelection,loadingSettings] = await Promise.all([readSelection?.(profile.id),readLoadingSettings?.(profile.id)]); }
